@@ -16,4 +16,8 @@ export default defineConfig({
     // Aumenta el límite de la advertencia a 1500 KB (1.5 MB)
     chunkSizeWarningLimit: 1500,
   },
+	preview: {
+    host: true,
+    allowedHosts: ['n8n-dashboard.mv7mvl.easypanel.host']
+  }
 });
