@@ -10,8 +10,9 @@ import {
   getPaginationRowModel,
   getSortedRowModel,
   useReactTable,
+  FilterFn, // Import FilterFn
 } from '@tanstack/react-table';
-import { ChevronDown } from 'lucide-react'; // Removed Search icon as it's now handled by the parent
+import { ChevronDown } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -35,9 +36,10 @@ interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
   onRowClick?: (row: TData) => void;
-  globalFilter?: string; // Nuevo prop para el filtro global
-  setGlobalFilter?: (filter: string) => void; // Nuevo prop para actualizar el filtro global
-  filterPlaceholder?: string; // Nuevo prop para el placeholder del filtro
+  globalFilter?: string;
+  setGlobalFilter?: (filter: string) => void;
+  filterPlaceholder?: string;
+  globalFilterFn?: FilterFn<TData>; // New prop for custom global filter function
 }
 
 export function DataTable<TData, TValue>({
@@ -47,6 +49,7 @@ export function DataTable<TData, TValue>({
   globalFilter,
   setGlobalFilter,
   filterPlaceholder = 'Buscar...',
+  globalFilterFn, // Destructure the new prop
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
@@ -64,15 +67,15 @@ export function DataTable<TData, TValue>({
     getFilteredRowModel: getFilteredRowModel(),
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
-    // Configuración para el filtro global
     state: {
       sorting,
       columnFilters,
       columnVisibility,
       rowSelection,
-      globalFilter, // Añadir globalFilter al estado
+      globalFilter,
     },
-    onGlobalFilterChange: setGlobalFilter, // Manejar cambios en el filtro global
+    onGlobalFilterChange: setGlobalFilter,
+    globalFilterFn: globalFilterFn, // Pass the custom filter function if provided
   });
 
   return (
@@ -82,7 +85,6 @@ export function DataTable<TData, TValue>({
           {/* Input de búsqueda global */}
           {setGlobalFilter && (
             <div className="relative flex-1">
-              {/* El icono de búsqueda se puede añadir aquí si se desea, o en el componente padre */}
               <Input
                 placeholder={filterPlaceholder}
                 value={globalFilter ?? ''}

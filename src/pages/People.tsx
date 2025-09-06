@@ -1,8 +1,8 @@
-import { useState, useMemo } from 'react';
-import { ColumnDef } from '@tanstack/react-table';
+import { useState, useMemo, useEffect } from 'react';
+import { ColumnDef, FilterFn } from '@tanstack/react-table'; // Import FilterFn
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PlusCircle, Edit, ArrowUpDown } from 'lucide-react'; // Removed Search icon
+import { PlusCircle, Edit, ArrowUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui-custom/DataTable';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -52,6 +52,31 @@ type SocioTitularFormValues = z.infer<typeof socioTitularFormSchema>;
 // --- Tipo extendido para incluir el estado de pago ---
 type SocioTitularWithPaymentStatus = SocioTitularType & {
   paymentStatus: 'Pagado' | 'Exonerado' | 'No Pagado';
+};
+
+// --- Custom global filter function for SocioTitularWithPaymentStatus ---
+const socioTitularGlobalFilterFn: FilterFn<SocioTitularWithPaymentStatus> = (row, _columnId, filterValue) => {
+  const search = String(filterValue).toLowerCase().trim();
+  if (!search) return true; // If search is empty, show all rows
+
+  const searchTokens = search.split(/\s+/).filter(Boolean); // Split by spaces and remove empty strings
+  const originalRow = row.original;
+
+  const nombres = String(originalRow.nombres || '').toLowerCase();
+  const apellidoPaterno = String(originalRow.apellidoPaterno || '').toLowerCase();
+  const apellidoMaterno = String(originalRow.apellidoMaterno || '').toLowerCase();
+  const dni = String(originalRow.dni || '').toLowerCase();
+
+  // Check for DNI match first
+  if (dni.includes(search)) {
+    return true;
+  }
+
+  // Combine name fields for flexible search
+  const combinedName = `${nombres} ${apellidoPaterno} ${apellidoMaterno}`.toLowerCase();
+
+  // Check if all search tokens are present in the combined name
+  return searchTokens.every(token => combinedName.includes(token));
 };
 
 // --- Column Definitions ---
@@ -156,12 +181,31 @@ const economicSituations: SituacionEconomica[] = ['Pobre', 'Extremo Pobre'];
 const genders = ['Masculino', 'Femenino', 'Otro'];
 
 function People() {
-  const { data: socioTitularesData, loading, error, addRecord, updateRecord, deleteRecord } = useSupabaseData<SocioTitularType>({ tableName: 'socio_titulares' });
+  // State for filters
+  const [globalFilter, setGlobalFilter] = useState(''); // For DNI, names, surnames
+  const [selectedLocality, setSelectedLocality] = useState<string | null>(null); // For locality dropdown
+
+  // Fetch all socio_titulares to get unique localities for the dropdown
+  const { data: allSocioTitularesForLocalities, loading: loadingAllLocalities } = useSupabaseData<SocioTitularType>({
+    tableName: 'socio_titulares',
+    enabled: true,
+  });
+
+  // Fetch socio_titulares data, applying the locality filter
+  const { data: socioTitularesData, loading, error, addRecord, updateRecord, deleteRecord, setFilters } = useSupabaseData<SocioTitularType>({
+    tableName: 'socio_titulares',
+    initialFilters: selectedLocality ? { localidad: selectedLocality } : {},
+  });
+
+  // Update filters in useSupabaseData when selectedLocality changes
+  useEffect(() => {
+    setFilters(selectedLocality ? { localidad: selectedLocality } : {});
+  }, [selectedLocality, setFilters]);
+
   const { data: ingresosData, loading: loadingIngresos, error: errorIngresos } = useSupabaseData<Ingreso>({ tableName: 'ingresos' });
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingSocioTitular, setEditingSocioTitular] = useState<SocioTitularType | null>(null);
-  const [globalFilter, setGlobalFilter] = useState(''); // Estado para el filtro global
 
   const form = useForm<SocioTitularFormValues>({
     resolver: zodResolver(socioTitularFormSchema),
@@ -265,7 +309,19 @@ function People() {
     }
   };
 
-  // Procesar datos de socios titulares para incluir el estado de pago
+  // Derive unique localities from all fetched socio_titulares for the dropdown
+  const uniqueLocalities = useMemo(() => {
+    if (!allSocioTitularesForLocalities) return [];
+    const localities = new Set<string>();
+    allSocioTitularesForLocalities.forEach(socio => {
+      if (socio.localidad) {
+        localities.add(socio.localidad);
+      }
+    });
+    return Array.from(localities).sort();
+  }, [allSocioTitularesForLocalities]);
+
+  // Process socio titulares data to include payment status
   const processedSocioTitulares = useMemo(() => {
     if (!socioTitularesData || !ingresosData) return [];
 
@@ -315,7 +371,7 @@ function People() {
     return col;
   });
 
-  const overallLoading = loading || loadingIngresos;
+  const overallLoading = loading || loadingIngresos || loadingAllLocalities;
   const overallError = error || errorIngresos;
 
   if (overallLoading) {
@@ -342,12 +398,34 @@ function People() {
           </Button>
         </CardHeader>
         <CardContent>
+          <div className="flex items-center gap-4 mb-4">
+            <div className="grid gap-2 flex-1 max-w-xs">
+              <Label htmlFor="localityFilter" className="text-textSecondary">Filtrar por Localidad</Label>
+              <Select
+                onValueChange={(value) => setSelectedLocality(value === 'all' ? null : value)}
+                value={selectedLocality || 'all'}
+              >
+                <SelectTrigger id="localityFilter" className="rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
+                  <SelectValue placeholder="Todas las localidades" />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border rounded-lg shadow-lg">
+                  <SelectItem value="all" className="hover:bg-muted/50 cursor-pointer">Todas las localidades</SelectItem>
+                  {uniqueLocalities.map(loc => (
+                    <SelectItem key={loc} value={loc} className="hover:bg-muted/50 cursor-pointer">
+                      {loc}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
           <DataTable
             columns={columnsWithActions}
             data={processedSocioTitulares}
             globalFilter={globalFilter}
             setGlobalFilter={setGlobalFilter}
-            filterPlaceholder="Buscar por DNI, localidad o nombres..."
+            filterPlaceholder="Buscar por DNI, nombres o apellidos..."
+            globalFilterFn={socioTitularGlobalFilterFn} // Pass the custom filter function
           />
         </CardContent>
       </Card>
