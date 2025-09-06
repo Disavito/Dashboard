@@ -120,6 +120,7 @@ function Expenses() {
   const { data: colaboradoresData } = useSupabaseData<Colaborador>({ tableName: 'colaboradores', enabled: true }); // Enabled to fetch data for dropdown
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<GastoType | null>(null);
+  const [globalFilter, setGlobalFilter] = useState(''); // Estado para el filtro global
 
   const form = useForm<ExpenseFormValues>({
     resolver: zodResolver(expenseFormSchema),
@@ -239,7 +240,13 @@ function Expenses() {
           </Button>
         </CardHeader>
         <CardContent>
-          <DataTable columns={columnsWithActions} data={expenseData} searchColumn="description" searchPlaceholder="Buscar gastos por descripción..." />
+          <DataTable
+            columns={columnsWithActions}
+            data={expenseData}
+            globalFilter={globalFilter}
+            setGlobalFilter={setGlobalFilter}
+            filterPlaceholder="Buscar gastos por descripción..."
+          />
         </CardContent>
       </Card>
 

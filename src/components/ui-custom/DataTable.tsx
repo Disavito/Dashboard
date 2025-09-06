@@ -11,7 +11,7 @@ import {
   getSortedRowModel,
   useReactTable,
 } from '@tanstack/react-table';
-import { ChevronDown, Search } from 'lucide-react';
+import { ChevronDown } from 'lucide-react'; // Removed Search icon as it's now handled by the parent
 
 import { Button } from '@/components/ui/button';
 import {
@@ -34,17 +34,19 @@ import { Card, CardContent } from '@/components/ui/card';
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
-  searchColumn?: string;
-  searchPlaceholder?: string;
   onRowClick?: (row: TData) => void;
+  globalFilter?: string; // Nuevo prop para el filtro global
+  setGlobalFilter?: (filter: string) => void; // Nuevo prop para actualizar el filtro global
+  filterPlaceholder?: string; // Nuevo prop para el placeholder del filtro
 }
 
 export function DataTable<TData, TValue>({
   columns,
   data,
-  searchColumn,
-  searchPlaceholder = 'Buscar...',
   onRowClick,
+  globalFilter,
+  setGlobalFilter,
+  filterPlaceholder = 'Buscar...',
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
@@ -62,28 +64,30 @@ export function DataTable<TData, TValue>({
     getFilteredRowModel: getFilteredRowModel(),
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
+    // Configuración para el filtro global
     state: {
       sorting,
       columnFilters,
       columnVisibility,
       rowSelection,
+      globalFilter, // Añadir globalFilter al estado
     },
+    onGlobalFilterChange: setGlobalFilter, // Manejar cambios en el filtro global
   });
 
   return (
     <Card className="rounded-xl border-border shadow-lg animate-fade-in">
       <CardContent className="p-6">
         <div className="flex items-center py-4 gap-4">
-          {searchColumn && (
+          {/* Input de búsqueda global */}
+          {setGlobalFilter && (
             <div className="relative flex-1">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              {/* El icono de búsqueda se puede añadir aquí si se desea, o en el componente padre */}
               <Input
-                placeholder={searchPlaceholder}
-                value={(table.getColumn(searchColumn)?.getFilterValue() as string) ?? ''}
-                onChange={(event) =>
-                  table.getColumn(searchColumn)?.setFilterValue(event.target.value)
-                }
-                className="max-w-sm pl-10 rounded-lg border-border focus:ring-primary focus:border-primary transition-all duration-300"
+                placeholder={filterPlaceholder}
+                value={globalFilter ?? ''}
+                onChange={(event) => setGlobalFilter(event.target.value)}
+                className="max-w-sm pl-4 rounded-lg border-border focus:ring-primary focus:border-primary transition-all duration-300"
               />
             </div>
           )}

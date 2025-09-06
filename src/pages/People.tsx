@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { ColumnDef } from '@tanstack/react-table';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PlusCircle, Edit, ArrowUpDown } from 'lucide-react'; // Removed unused icons
+import { PlusCircle, Edit, ArrowUpDown } from 'lucide-react'; // Removed Search icon
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui-custom/DataTable';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useSupabaseData } from '@/hooks/useSupabaseData';
-import { SocioTitular as SocioTitularType, SituacionEconomica } from '@/lib/types';
+import { SocioTitular as SocioTitularType, SituacionEconomica, Ingreso } from '@/lib/types';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -49,8 +49,13 @@ const socioTitularFormSchema = z.object({
 
 type SocioTitularFormValues = z.infer<typeof socioTitularFormSchema>;
 
+// --- Tipo extendido para incluir el estado de pago ---
+type SocioTitularWithPaymentStatus = SocioTitularType & {
+  paymentStatus: 'Pagado' | 'Exonerado' | 'No Pagado';
+};
+
 // --- Column Definitions ---
-const socioTitularBaseColumns: ColumnDef<SocioTitularType>[] = [ // Renamed to avoid conflict with dynamic columns
+const socioTitularBaseColumns: ColumnDef<SocioTitularWithPaymentStatus>[] = [
   {
     accessorKey: 'nombres',
     header: ({ column }) => (
@@ -91,6 +96,11 @@ const socioTitularBaseColumns: ColumnDef<SocioTitularType>[] = [ // Renamed to a
     cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('direccionVivienda') || 'N/A'}</span>,
   },
   {
+    accessorKey: 'localidad', // Añadir localidad para búsqueda
+    header: 'Localidad',
+    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('localidad') || 'N/A'}</span>,
+  },
+  {
     accessorKey: 'situacionEconomica',
     header: 'Situación Económica',
     cell: ({ row }) => {
@@ -103,6 +113,23 @@ const socioTitularBaseColumns: ColumnDef<SocioTitularType>[] = [ // Renamed to a
           !situacion && 'bg-gray-400/20 text-gray-400'
         )}>
           {situacion || 'No especificado'}
+        </span>
+      );
+    },
+  },
+  {
+    accessorKey: 'paymentStatus', // Nueva columna para el estado de pago
+    header: 'Estado de Pago',
+    cell: ({ row }) => {
+      const status = row.original.paymentStatus;
+      return (
+        <span className={cn(
+          "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
+          status === 'Pagado' && 'bg-green-400/20 text-green-400',
+          status === 'Exonerado' && 'bg-blue-400/20 text-blue-400',
+          status === 'No Pagado' && 'bg-red-400/20 text-red-400'
+        )}>
+          {status}
         </span>
       );
     },
@@ -130,8 +157,11 @@ const genders = ['Masculino', 'Femenino', 'Otro'];
 
 function People() {
   const { data: socioTitularesData, loading, error, addRecord, updateRecord, deleteRecord } = useSupabaseData<SocioTitularType>({ tableName: 'socio_titulares' });
+  const { data: ingresosData, loading: loadingIngresos, error: errorIngresos } = useSupabaseData<Ingreso>({ tableName: 'ingresos' });
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingSocioTitular, setEditingSocioTitular] = useState<SocioTitularType | null>(null);
+  const [globalFilter, setGlobalFilter] = useState(''); // Estado para el filtro global
 
   const form = useForm<SocioTitularFormValues>({
     resolver: zodResolver(socioTitularFormSchema),
@@ -235,8 +265,27 @@ function People() {
     }
   };
 
+  // Procesar datos de socios titulares para incluir el estado de pago
+  const processedSocioTitulares = useMemo(() => {
+    if (!socioTitularesData || !ingresosData) return [];
+
+    const paidDnis = new Set(ingresosData.map(ingreso => ingreso.dni).filter(Boolean) as string[]);
+
+    return socioTitularesData.map(socio => {
+      let paymentStatus: 'Pagado' | 'Exonerado' | 'No Pagado' = 'No Pagado';
+
+      if (socio.situacionEconomica === 'Extremo Pobre') {
+        paymentStatus = 'Exonerado';
+      } else if (socio.dni && socio.situacionEconomica === 'Pobre' && paidDnis.has(socio.dni)) {
+        paymentStatus = 'Pagado';
+      }
+
+      return { ...socio, paymentStatus };
+    });
+  }, [socioTitularesData, ingresosData]);
+
   // Update column actions to use the new handlers, defined inside the component
-  const columnsWithActions: ColumnDef<SocioTitularType>[] = socioTitularBaseColumns.map(col => {
+  const columnsWithActions: ColumnDef<SocioTitularWithPaymentStatus>[] = socioTitularBaseColumns.map(col => {
     if (col.id === 'actions') {
       return {
         ...col,
@@ -266,12 +315,15 @@ function People() {
     return col;
   });
 
-  if (loading) {
-    return <div className="text-center text-muted-foreground">Cargando socios titulares...</div>;
+  const overallLoading = loading || loadingIngresos;
+  const overallError = error || errorIngresos;
+
+  if (overallLoading) {
+    return <div className="text-center text-muted-foreground">Cargando socios titulares y datos de ingresos...</div>;
   }
 
-  if (error) {
-    return <div className="text-center text-destructive">Error al cargar socios titulares: {error}</div>;
+  if (overallError) {
+    return <div className="text-center text-destructive">Error al cargar datos: {overallError}</div>;
   }
 
   return (
@@ -281,7 +333,7 @@ function People() {
           <div>
             <CardTitle className="text-foreground">Gestión de Titulares</CardTitle>
             <CardDescription className="text-muted-foreground">
-              Gestiona los perfiles de los titulares.
+              Gestiona los perfiles de los titulares y su estado de pago.
             </CardDescription>
           </div>
           <Button onClick={() => handleOpenDialog()} className="flex items-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
@@ -290,7 +342,13 @@ function People() {
           </Button>
         </CardHeader>
         <CardContent>
-          <DataTable columns={columnsWithActions} data={socioTitularesData} searchColumn="nombres" searchPlaceholder="Buscar socios por nombres..." />
+          <DataTable
+            columns={columnsWithActions}
+            data={processedSocioTitulares}
+            globalFilter={globalFilter}
+            setGlobalFilter={setGlobalFilter}
+            filterPlaceholder="Buscar por DNI, localidad o nombres..."
+          />
         </CardContent>
       </Card>
 

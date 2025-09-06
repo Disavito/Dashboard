@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ColumnDef } from '@tanstack/react-table';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PlusCircle, Edit, ArrowUpDown } from 'lucide-react'; // Removed unused icons
+import { PlusCircle, Edit, ArrowUpDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui-custom/DataTable';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -112,6 +112,7 @@ function Income() {
   const { data: incomeData, loading, error, addRecord, updateRecord, deleteRecord } = useSupabaseData<IngresoType>({ tableName: 'ingresos' });
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingIncome, setEditingIncome] = useState<IngresoType | null>(null);
+  const [globalFilter, setGlobalFilter] = useState(''); // Estado para el filtro global
 
   const form = useForm<IncomeFormValues>({
     resolver: zodResolver(incomeFormSchema),
@@ -228,7 +229,13 @@ function Income() {
           </Button>
         </CardHeader>
         <CardContent>
-          <DataTable columns={columnsWithActions} data={incomeData} searchColumn="full_name" searchPlaceholder="Buscar ingresos por nombre..." />
+          <DataTable
+            columns={columnsWithActions}
+            data={incomeData}
+            globalFilter={globalFilter}
+            setGlobalFilter={setGlobalFilter}
+            filterPlaceholder="Buscar ingresos por nombre..."
+          />
         </CardContent>
       </Card>
 

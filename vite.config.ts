@@ -10,6 +10,7 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
+    include: ['@tanstack/react-table'], // Forzar a Vite a incluir @tanstack/react-table en la optimización
     exclude: ['lucide-react'],
   },
   build: {
