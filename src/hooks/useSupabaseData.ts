@@ -141,7 +141,7 @@ export function useSupabaseData<T>(options: UseSupabaseDataOptions) {
     setFilters,
     sort,
     setSort,
-    fetchData,
+    refreshData: fetchData, // Exponer fetchData como refreshData
     addRecord,
     updateRecord,
     deleteRecord,

@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ColumnDef } from '@tanstack/react-table';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PlusCircle, Edit, ArrowUpDown } from 'lucide-react';
+import { PlusCircle, Edit, ArrowUpDown, Loader2, CalendarIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui-custom/DataTable';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -11,16 +11,23 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useSupabaseData } from '@/hooks/useSupabaseData';
-import { Ingreso as IngresoType } from '@/lib/types';
+import { Ingreso as IngresoType, Cuenta } from '@/lib/types'; // REMOVED: SocioTitular
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { supabase } from '@/lib/supabaseClient';
+import { toast } from 'sonner';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
+import { FormField, FormItem, FormLabel, FormControl, FormMessage, Form } from '@/components/ui/form'; // Import Form
+
 
 // --- Form Schema for Ingreso ---
 const incomeFormSchema = z.object({
   receipt_number: z.string().min(1, { message: 'El número de recibo es requerido.' }).max(255, { message: 'El número de recibo es demasiado largo.' }),
-  dni: z.string().min(1, { message: 'El DNI es requerido.' }).max(20, { message: 'El DNI es demasiado largo.' }),
+  dni: z.string().min(8, { message: 'El DNI debe tener 8 dígitos.' }).max(8, { message: 'El DNI debe tener 8 dígitos.' }).regex(/^\d{8}$/, { message: 'El DNI debe ser 8 dígitos numéricos.' }),
   full_name: z.string().min(1, { message: 'El nombre completo es requerido.' }).max(255, { message: 'El nombre completo es demasiado largo.' }),
   amount: z.preprocess(
     (val) => Number(val),
@@ -28,7 +35,7 @@ const incomeFormSchema = z.object({
   ),
   account: z.string().min(1, { message: 'La cuenta es requerida.' }),
   date: z.string().min(1, { message: 'La fecha es requerida.' }),
-  transaction_type: z.string().min(1, { message: 'El tipo de transacción es requerido.' }),
+  transaction_type: z.enum(['Ingreso', 'Anulacion', 'Devolucion'], { message: 'Tipo de transacción inválido.' }).optional(), // ADDED: .optional()
 });
 
 type IncomeFormValues = z.infer<typeof incomeFormSchema>;
@@ -105,14 +112,16 @@ const incomeColumns: ColumnDef<IngresoType>[] = [
   },
 ];
 
-const transactionTypes = ['Aporte', 'Donación', 'Cuota', 'Otros']; // Example transaction types for Ingreso
-const accounts = ['Caja Principal', 'Banco Ahorros', 'Inversión']; // Example accounts
+const transactionTypes = ['Ingreso', 'Anulacion', 'Devolucion']; // Restricted transaction types
 
 function Income() {
   const { data: incomeData, loading, error, addRecord, updateRecord, deleteRecord } = useSupabaseData<IngresoType>({ tableName: 'ingresos' });
+  const { data: accountsData, loading: accountsLoading, error: accountsError } = useSupabaseData<Cuenta>({ tableName: 'cuentas' });
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingIncome, setEditingIncome] = useState<IngresoType | null>(null);
-  const [globalFilter, setGlobalFilter] = useState(''); // Estado para el filtro global
+  const [globalFilter, setGlobalFilter] = useState('');
+  const [isDniSearching, setIsDniSearching] = useState(false);
 
   const form = useForm<IncomeFormValues>({
     resolver: zodResolver(incomeFormSchema),
@@ -120,16 +129,59 @@ function Income() {
       receipt_number: '',
       dni: '',
       full_name: '',
-      amount: 0,
-      account: '',
-      date: format(new Date(), 'yyyy-MM-dd'),
-      transaction_type: '',
+      amount: 0, // Default to 0, placeholder will guide
+      account: '', // Default to empty string for placeholder
+      date: '', // Default to empty string for placeholder
+      transaction_type: undefined, // CHANGED: from '' to undefined
     },
   });
+
+  const { handleSubmit, register, setValue, watch, formState: { errors } } = form;
+  const watchedDni = watch('dni');
+
+  // Fetch accounts from Supabase
+  const availableAccounts = accountsData.map(account => account.name);
+
+  // DNI Auto-population Logic
+  const searchSocioByDni = useCallback(async (dni: string) => {
+    if (!dni || dni.length !== 8) {
+      setValue('full_name', '');
+      return;
+    }
+    setIsDniSearching(true);
+    const { data, error } = await supabase
+      .from('socio_titulares')
+      .select('nombres, apellidoPaterno, apellidoMaterno')
+      .eq('dni', dni)
+      .single();
+
+    if (error && error.code !== 'PGRST116') { // PGRST116 means "no rows found"
+      console.error('Error searching socio by DNI:', error.message);
+      toast.error('Error al buscar DNI', { description: error.message });
+      setValue('full_name', '');
+    } else if (data) {
+      const fullName = `${data.nombres || ''} ${data.apellidoPaterno || ''} ${data.apellidoMaterno || ''}`.trim();
+      setValue('full_name', fullName);
+      toast.success('Socio encontrado', { description: `Nombre: ${fullName}` });
+    } else {
+      setValue('full_name', '');
+      toast.warning('DNI no encontrado', { description: 'No se encontró un socio con este DNI.' });
+    }
+    setIsDniSearching(false);
+  }, [setValue]);
+
+  useEffect(() => {
+    // If editing, trigger DNI search to populate full_name
+    if (editingIncome?.dni) {
+      searchSocioByDni(editingIncome.dni);
+    }
+  }, [editingIncome, searchSocioByDni]);
+
 
   const handleOpenDialog = (income?: IngresoType) => {
     setEditingIncome(income || null);
     if (income) {
+      // When editing, populate with existing income data
       form.reset({
         receipt_number: income.receipt_number || '',
         dni: income.dni || '',
@@ -137,17 +189,18 @@ function Income() {
         amount: income.amount,
         account: income.account || '',
         date: income.date,
-        transaction_type: income.transaction_type || '',
+        transaction_type: income.transaction_type as IncomeFormValues['transaction_type'] || undefined, // Use undefined if not set
       });
     } else {
+      // When adding new income, reset to empty or default values for placeholders
       form.reset({
         receipt_number: '',
         dni: '',
         full_name: '',
         amount: 0,
-        account: '',
-        date: format(new Date(), 'yyyy-MM-dd'),
-        transaction_type: '',
+        account: '', // Empty for placeholder
+        date: '', // Empty for placeholder
+        transaction_type: undefined, // CHANGED: to undefined for placeholder
       });
     }
     setIsDialogOpen(true);
@@ -168,7 +221,7 @@ function Income() {
     handleCloseDialog();
   };
 
-  const handleDelete = async (id: number) => { // Ingreso ID is number
+  const handleDelete = async (id: number) => {
     if (window.confirm('¿Estás seguro de que quieres eliminar este ingreso?')) {
       await deleteRecord(id);
     }
@@ -205,12 +258,16 @@ function Income() {
     return col;
   });
 
-  if (loading) {
-    return <div className="text-center text-muted-foreground">Cargando ingresos...</div>;
+  if (loading || accountsLoading) {
+    return <div className="text-center text-muted-foreground">Cargando ingresos y cuentas...</div>;
   }
 
   if (error) {
     return <div className="text-center text-destructive">Error al cargar ingresos: {error}</div>;
+  }
+
+  if (accountsError) {
+    return <div className="text-center text-destructive">Error al cargar cuentas: {accountsError}</div>;
   }
 
   return (
@@ -247,110 +304,153 @@ function Income() {
               {editingIncome ? 'Realiza cambios en el ingreso existente aquí.' : 'Añade un nuevo registro de ingreso a tu sistema.'}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="receipt_number" className="text-right text-textSecondary">
-                Nº Recibo
-              </Label>
-              <Input
-                id="receipt_number"
-                {...form.register('receipt_number')}
-                className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+          {/* Wrap the form with the Form component */}
+          <Form {...form}>
+            <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="receipt_number" className="text-right text-textSecondary">
+                  Nº Recibo
+                </Label>
+                <Input
+                  id="receipt_number"
+                  {...register('receipt_number')}
+                  className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+                  placeholder="Ej: 001-2024"
+                />
+                {errors.receipt_number && <p className="col-span-4 text-right text-error text-sm">{errors.receipt_number.message}</p>}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="dni" className="text-right text-textSecondary">
+                  DNI
+                </Label>
+                <div className="col-span-3 relative">
+                  <Input
+                    id="dni"
+                    {...register('dni')}
+                    onBlur={() => searchSocioByDni(watchedDni)}
+                    className="rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300 pr-10"
+                    placeholder="Ej: 12345678"
+                  />
+                  {isDniSearching && (
+                    <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />
+                  )}
+                </div>
+                {errors.dni && <p className="col-span-4 text-right text-error text-sm">{errors.dni.message}</p>}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="full_name" className="text-right text-textSecondary">
+                  Nombre Completo
+                </Label>
+                <Input
+                  id="full_name"
+                  {...register('full_name')}
+                  readOnly // Make it read-only as it's auto-populated
+                  className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300 cursor-not-allowed"
+                  placeholder="Se auto-completa con el DNI"
+                />
+                {errors.full_name && <p className="col-span-4 text-right text-error text-sm">{errors.full_name.message}</p>}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="amount" className="text-right text-textSecondary">
+                  Monto
+                </Label>
+                <Input
+                  id="amount"
+                  type="number"
+                  step="0.01"
+                  {...register('amount')}
+                  className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+                  placeholder="Ej: 150.00"
+                />
+                {errors.amount && <p className="col-span-4 text-right text-error text-sm">{errors.amount.message}</p>}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="account" className="text-right text-textSecondary">
+                  Cuenta
+                </Label>
+                <Select onValueChange={(value) => setValue('account', value)} value={watch('account')}>
+                  <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
+                    <SelectValue placeholder="Selecciona una cuenta" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border rounded-lg shadow-lg">
+                    {availableAccounts.length > 0 ? (
+                      availableAccounts.map(account => (
+                        <SelectItem key={account} value={account} className="hover:bg-muted/50 cursor-pointer">
+                          {account}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="no-accounts" disabled>No hay cuentas disponibles</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+                {errors.account && <p className="col-span-4 text-right text-error text-sm">{errors.account.message}</p>}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="transaction_type" className="text-right text-textSecondary">
+                  Tipo Transacción
+                </Label>
+                <Select onValueChange={(value) => setValue('transaction_type', value as IncomeFormValues['transaction_type'])} value={watch('transaction_type')}>
+                  <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
+                    <SelectValue placeholder="Selecciona un tipo de transacción" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border rounded-lg shadow-lg">
+                    {transactionTypes.map(type => (
+                      <SelectItem key={type} value={type} className="hover:bg-muted/50 cursor-pointer">
+                        {type}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {errors.transaction_type && <p className="col-span-4 text-right text-error text-sm">{errors.transaction_type.message}</p>}
+              </div>
+              <FormField
+                control={form.control}
+                name="date"
+                render={({ field }) => (
+                  <FormItem className="grid grid-cols-4 items-center gap-4">
+                    <FormLabel className="text-right text-textSecondary">Fecha</FormLabel>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            variant={"outline"}
+                            className={cn(
+                              "col-span-3 w-full justify-start text-left font-normal rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300",
+                              !field.value && "text-muted-foreground"
+                            )}
+                          >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {field.value ? format(parseISO(field.value), "PPP", { locale: es }) : <span>Selecciona una fecha</span>}
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0 bg-card border-border rounded-xl shadow-lg" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={field.value ? parseISO(field.value) : undefined}
+                          onSelect={(date) => {
+                            field.onChange(date ? format(date, 'yyyy-MM-dd') : '');
+                          }}
+                          initialFocus
+                          locale={es}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <FormMessage className="col-span-4 text-right" />
+                  </FormItem>
+                )}
               />
-              {form.formState.errors.receipt_number && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.receipt_number.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="dni" className="text-right text-textSecondary">
-                DNI
-              </Label>
-              <Input
-                id="dni"
-                {...form.register('dni')}
-                className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-              />
-              {form.formState.errors.dni && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.dni.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="full_name" className="text-right text-textSecondary">
-                Nombre Completo
-              </Label>
-              <Input
-                id="full_name"
-                {...form.register('full_name')}
-                className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-              />
-              {form.formState.errors.full_name && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.full_name.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="amount" className="text-right text-textSecondary">
-                Monto
-              </Label>
-              <Input
-                id="amount"
-                type="number"
-                step="0.01"
-                {...form.register('amount')}
-                className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-              />
-              {form.formState.errors.amount && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.amount.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="account" className="text-right text-textSecondary">
-                Cuenta
-              </Label>
-              <Select onValueChange={(value) => form.setValue('account', value)} value={form.watch('account')}>
-                <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
-                  <SelectValue placeholder="Selecciona una cuenta" />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border rounded-lg shadow-lg">
-                  {accounts.map(account => (
-                    <SelectItem key={account} value={account} className="hover:bg-muted/50 cursor-pointer">
-                      {account}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.account && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.account.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="transaction_type" className="text-right text-textSecondary">
-                Tipo Transacción
-              </Label>
-              <Select onValueChange={(value) => form.setValue('transaction_type', value)} value={form.watch('transaction_type')}>
-                <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
-                  <SelectValue placeholder="Selecciona un tipo" />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border rounded-lg shadow-lg">
-                  {transactionTypes.map(type => (
-                    <SelectItem key={type} value={type} className="hover:bg-muted/50 cursor-pointer">
-                      {type}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.transaction_type && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.transaction_type.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="date" className="text-right text-textSecondary">
-                Fecha
-              </Label>
-              <Input
-                id="date"
-                type="date"
-                {...form.register('date')}
-                className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-              />
-              {form.formState.errors.date && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.date.message}</p>}
-            </div>
-            <DialogFooter className="mt-4">
-              <Button type="button" variant="outline" onClick={handleCloseDialog} className="rounded-lg border-border hover:bg-muted/50 transition-all duration-300">
-                Cancelar
-              </Button>
-              <Button type="submit" className="rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
-                {editingIncome ? 'Guardar Cambios' : 'Añadir Ingreso'}
-              </Button>
-            </DialogFooter>
-          </form>
+              <DialogFooter className="mt-4">
+                <Button type="button" variant="outline" onClick={handleCloseDialog} className="rounded-lg border-border hover:bg-muted/50 transition-all duration-300">
+                  Cancelar
+                </Button>
+                <Button type="submit" className="rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
+                  {editingIncome ? 'Guardar Cambios' : 'Añadir Ingreso'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
         </DialogContent>
       </Dialog>
     </div>
