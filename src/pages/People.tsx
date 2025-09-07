@@ -186,7 +186,7 @@ function People() {
   const handleCloseFormDialog = () => {
     setIsFormDialogOpen(false);
     setEditingSocioId(undefined);
-    refreshData(); // Refrescar datos después de enviar/cancelar el formulario
+    refreshData(); // Refrescar datos después de la eliminación o edición
   };
 
   // Derive unique localities from all fetched socio_titulares for the dropdown
@@ -324,8 +324,8 @@ function People() {
           <div className="px-6 pb-6">
             <SocioTitularRegistrationForm
               socioId={editingSocioId}
-              onClose={handleCloseFormDialog}
-              onSuccess={handleCloseFormDialog}
+              onClose={handleCloseFormDialog} // Este se usa para cerrar el diálogo principal SOLO en ediciones
+              onSuccess={refreshData} // Este solo refresca los datos de la tabla, no cierra el diálogo
             />
           </div>
         </DialogContent>

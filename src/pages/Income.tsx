@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useSupabaseData } from '@/hooks/useSupabaseData';
-import { Ingreso as IngresoType, Cuenta } from '@/lib/types'; // REMOVED: SocioTitular
+import { Ingreso as IngresoType, Cuenta } from '@/lib/types';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -21,7 +21,8 @@ import { toast } from 'sonner';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
-import { FormField, FormItem, FormLabel, FormControl, FormMessage, Form } from '@/components/ui/form'; // Import Form
+import { FormField, FormItem, FormLabel, FormControl, FormMessage, Form } from '@/components/ui/form';
+import ConfirmationDialog from '@/components/ui-custom/ConfirmationDialog';
 
 
 // --- Form Schema for Ingreso ---
@@ -35,7 +36,7 @@ const incomeFormSchema = z.object({
   ),
   account: z.string().min(1, { message: 'La cuenta es requerida.' }),
   date: z.string().min(1, { message: 'La fecha es requerida.' }),
-  transaction_type: z.enum(['Ingreso', 'Anulacion', 'Devolucion'], { message: 'Tipo de transacción inválido.' }).optional(), // ADDED: .optional()
+  transaction_type: z.enum(['Ingreso', 'Anulacion', 'Devolucion'], { message: 'Tipo de transacción inválido.' }).optional(),
 });
 
 type IncomeFormValues = z.infer<typeof incomeFormSchema>;
@@ -123,16 +124,22 @@ function Income() {
   const [globalFilter, setGlobalFilter] = useState('');
   const [isDniSearching, setIsDniSearching] = useState(false);
 
+  // State for confirmation dialog
+  const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
+  const [dataToConfirm, setDataToConfirm] = useState<IncomeFormValues | null>(null);
+  const [isConfirmingSubmission, setIsConfirmingSubmission] = useState(false);
+
+
   const form = useForm<IncomeFormValues>({
     resolver: zodResolver(incomeFormSchema),
     defaultValues: {
       receipt_number: '',
       dni: '',
       full_name: '',
-      amount: 0, // Default to 0, placeholder will guide
-      account: '', // Default to empty string for placeholder
-      date: '', // Default to empty string for placeholder
-      transaction_type: undefined, // CHANGED: from '' to undefined
+      amount: 0,
+      account: '',
+      date: '',
+      transaction_type: undefined,
     },
   });
 
@@ -155,7 +162,7 @@ function Income() {
       .eq('dni', dni)
       .single();
 
-    if (error && error.code !== 'PGRST116') { // PGRST116 means "no rows found"
+    if (error && error.code !== 'PGRST116') {
       console.error('Error searching socio by DNI:', error.message);
       toast.error('Error al buscar DNI', { description: error.message });
       setValue('full_name', '');
@@ -171,17 +178,21 @@ function Income() {
   }, [setValue]);
 
   useEffect(() => {
-    // If editing, trigger DNI search to populate full_name
     if (editingIncome?.dni) {
       searchSocioByDni(editingIncome.dni);
     }
   }, [editingIncome, searchSocioByDni]);
 
+  // NEW: Function to close *only* the confirmation dialog
+  const handleCloseConfirmationOnly = () => {
+    setIsConfirmDialogOpen(false);
+    setDataToConfirm(null);
+    setIsConfirmingSubmission(false);
+  };
 
   const handleOpenDialog = (income?: IngresoType) => {
     setEditingIncome(income || null);
     if (income) {
-      // When editing, populate with existing income data
       form.reset({
         receipt_number: income.receipt_number || '',
         dni: income.dni || '',
@@ -189,18 +200,17 @@ function Income() {
         amount: income.amount,
         account: income.account || '',
         date: income.date,
-        transaction_type: income.transaction_type as IncomeFormValues['transaction_type'] || undefined, // Use undefined if not set
+        transaction_type: income.transaction_type as IncomeFormValues['transaction_type'] || undefined,
       });
     } else {
-      // When adding new income, reset to empty or default values for placeholders
       form.reset({
         receipt_number: '',
         dni: '',
         full_name: '',
         amount: 0,
-        account: '', // Empty for placeholder
-        date: '', // Empty for placeholder
-        transaction_type: undefined, // CHANGED: to undefined for placeholder
+        account: '',
+        date: '',
+        transaction_type: undefined,
       });
     }
     setIsDialogOpen(true);
@@ -209,21 +219,56 @@ function Income() {
   const handleCloseDialog = () => {
     setIsDialogOpen(false);
     setEditingIncome(null);
-    form.reset();
+    form.reset(); // Clears form fields
+    handleCloseConfirmationOnly(); // Also ensure confirmation dialog is closed and data cleared
   };
 
-  const onSubmit = async (values: IncomeFormValues) => {
-    if (editingIncome) {
-      await updateRecord(editingIncome.id, values);
-    } else {
-      await addRecord(values);
+  // Modified onSubmit to open confirmation dialog
+  const onSubmit = async (values: IncomeFormValues, event?: React.BaseSyntheticEvent) => {
+    event?.preventDefault();
+    setDataToConfirm(values);
+    setIsConfirmDialogOpen(true);
+  };
+
+  // Function to handle actual submission after confirmation
+  const handleConfirmSubmit = async () => {
+    if (!dataToConfirm) return;
+
+    setIsConfirmingSubmission(true);
+    try {
+      if (editingIncome) {
+        await updateRecord(editingIncome.id, dataToConfirm);
+        toast.success('Ingreso actualizado', { description: 'El ingreso ha sido actualizado exitosamente.' });
+        handleCloseDialog(); // Close main dialog for edits
+      } else {
+        await addRecord(dataToConfirm);
+        toast.success('Ingreso añadido', { description: 'El nuevo ingreso ha sido registrado exitosamente.' });
+        
+        // For new entries: reset form, close confirmation dialog, but keep main dialog open
+        form.reset({
+          receipt_number: '',
+          dni: '',
+          full_name: '',
+          amount: 0,
+          account: '',
+          date: '',
+          transaction_type: undefined,
+        });
+        setEditingIncome(null); // Clear editing state
+        handleCloseConfirmationOnly(); // Close only the confirmation dialog
+      }
+    } catch (submitError: any) {
+      console.error('Error al guardar el ingreso:', submitError.message);
+      toast.error('Error al guardar ingreso', { description: submitError.message });
+    } finally {
+      setIsConfirmingSubmission(false);
     }
-    handleCloseDialog();
   };
 
   const handleDelete = async (id: number) => {
     if (window.confirm('¿Estás seguro de que quieres eliminar este ingreso?')) {
       await deleteRecord(id);
+      toast.success('Ingreso eliminado', { description: 'El ingreso ha sido eliminado exitosamente.' });
     }
   };
 
@@ -344,7 +389,7 @@ function Income() {
                 <Input
                   id="full_name"
                   {...register('full_name')}
-                  readOnly // Make it read-only as it's auto-populated
+                  readOnly
                   className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300 cursor-not-allowed"
                   placeholder="Se auto-completa con el DNI"
                 />
@@ -360,7 +405,7 @@ function Income() {
                   step="0.01"
                   {...register('amount')}
                   className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-                  placeholder="Ej: 150.00"
+                  placeholder="0.00" // Added placeholder
                 />
                 {errors.amount && <p className="col-span-4 text-right text-error text-sm">{errors.amount.message}</p>}
               </div>
@@ -453,6 +498,18 @@ function Income() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={isConfirmDialogOpen}
+        onClose={handleCloseConfirmationOnly}
+        onConfirm={handleConfirmSubmit}
+        title={editingIncome ? 'Confirmar Edición de Ingreso' : 'Confirmar Nuevo Ingreso'}
+        description="Por favor, revisa los detalles del ingreso antes de confirmar."
+        data={dataToConfirm || {}}
+        confirmButtonText={editingIncome ? 'Confirmar Actualización' : 'Confirmar Registro'}
+        isConfirming={isConfirmingSubmission}
+      />
     </div>
   );
 }

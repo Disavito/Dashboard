@@ -7,11 +7,13 @@ import { supabase } from '@/lib/supabaseClient';
 import { ECONOMIC_SITUATIONS } from '@/lib/data/constants';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-// REMOVED: import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { SocioTitular as SocioTitularType } from '@/lib/types';
 import { format, parse } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
+import ConfirmationDialog from '@/components/ui-custom/ConfirmationDialog';
+
 
 const API_TOKEN = import.meta.env.VITE_CONSULTAS_PERU_API_TOKEN || 'bee07ff13163585f6a0d648bf7c1b13b9a2d7b2591139eab891';
 const API_URL = 'https://api.consultasperu.com/api/v1/query';
@@ -40,8 +42,7 @@ const socioTitularFormSchema = z.object({
   distritoVivienda: z.string().optional().nullable(),
   provinciaVivienda: z.string().optional().nullable(),
   regionVivienda: z.string().optional().nullable(),
-  situacionEconomica: z.enum(['Pobre', 'Extremo Pobre']).optional().nullable(),
-  // genero: z.string().optional().nullable(), // Eliminado el campo genero
+  situacionEconomica: z.enum(['Pobre', 'Extremo Pobre'], { message: 'La situación económica es requerida.' }), // Made mandatory
 });
 
 type SocioTitularFormValues = z.infer<typeof socioTitularFormSchema>;
@@ -58,6 +59,12 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
   const [submitMessage, setSubmitMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
   const [activeTab, setActiveTab] = useState<'personal' | 'housing'>('personal');
   const [dniFoundInSupabase, setDniFoundInSupabase] = useState<boolean | null>(null);
+
+  // State for confirmation dialog
+  const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
+  const [dataToConfirm, setDataToConfirm] = useState<SocioTitularFormValues | null>(null);
+  const [isConfirmingSubmission, setIsConfirmingSubmission] = useState(false);
+
 
   const form = useForm<SocioTitularFormValues>({
     resolver: zodResolver(socioTitularFormSchema),
@@ -81,12 +88,37 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
       distritoVivienda: null,
       provinciaVivienda: null,
       regionVivienda: null,
-      situacionEconomica: 'Pobre',
-      // genero: null, // Eliminado el campo genero
+      situacionEconomica: undefined, // No default selected value
     },
   });
 
-  const { handleSubmit, register, watch, formState: { errors, isSubmitting } } = form; // REMOVED: setValue
+  const { handleSubmit, register, watch, formState: { errors, isSubmitting } } = form;
+
+  // --- Helper function to render form input fields ---
+  const renderInputField = (
+    label: string,
+    name: keyof SocioTitularFormValues,
+    type: React.HTMLInputTypeAttribute,
+    placeholder?: string,
+    pattern?: string, // This will be passed as HTML pattern attribute
+    onBlur?: () => void,
+    required: boolean = true
+  ) => (
+    <div className="grid w-full items-center gap-1.5">
+      <Label htmlFor={name} className="text-textSecondary">
+        {label} {required && <span className="text-error">*</span>}
+      </Label>
+      <Input
+        id={name}
+        type={type}
+        placeholder={placeholder}
+        {...form.register(name, { onBlur: onBlur })} // onBlur is handled here
+        pattern={pattern} // Pass pattern directly to Input component
+        className="rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+      />
+      {errors[name] && <p className="text-error text-sm mt-1">{errors[name]?.message}</p>}
+    </div>
+  );
 
   // --- Date Formatting Helpers ---
   const formatDateForInput = (dateString: string | null | undefined): string | null => {
@@ -106,7 +138,7 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
     try {
       // Assuming dateString from input is DD/MM/YYYY
       const date = parse(dateString, 'dd/MM/yyyy', new Date());
-      return format(date, 'yyyy-MM-dd');
+      return format(date, 'yyyy-MM-DD');
     } catch (e) {
       console.error("Error parsing date for DB:", dateString, e);
       return dateString; // Return original if parsing fails
@@ -123,7 +155,7 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
           direccionDNI: null, distritoDNI: null, provinciaDNI: null, regionDNI: null,
           fechaNacimiento: null, celular: null, localidad: null, direccionVivienda: null,
           mz: null, lote: null, ubicacionReferencia: null, distritoVivienda: null,
-          provinciaVivienda: null, regionVivienda: null, situacionEconomica: 'Pobre', // genero: null, // Eliminado
+          provinciaVivienda: null, regionVivienda: null, situacionEconomica: undefined,
         });
         setDniFoundInSupabase(null);
         setSubmitMessage(null);
@@ -138,6 +170,7 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
 
       if (error) {
         console.error('Error loading socio data:', error.message);
+        toast.error('Error al cargar datos del socio', { description: error.message });
         setSubmitMessage({ type: 'error', text: `Error al cargar datos del socio: ${error.message}` });
         return;
       }
@@ -147,10 +180,9 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
           ...data,
           edad: data.edad || null,
           fechaNacimiento: formatDateForInput(data.fechaNacimiento),
-          situacionEconomica: data.situacionEconomica || 'Pobre',
+          situacionEconomica: data.situacionEconomica || undefined,
           dni: data.dni || null,
           celular: data.celular || null,
-          // genero: data.genero || null, // Eliminado
         });
         setDniFoundInSupabase(true); // DNI encontrado en la DB
         setSubmitMessage(null); // Limpiar mensajes al cargar exitosamente
@@ -164,6 +196,7 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
 
   const searchDniInSupabase = async (dni: string | null | undefined) => {
     if (!dni || dni.length !== 8) {
+      toast.warning('DNI inválido', { description: 'Por favor, ingresa un DNI válido de 8 dígitos.' });
       setSubmitMessage({ type: 'warning', text: 'Por favor, ingresa un DNI válido de 8 dígitos.' });
       setDniFoundInSupabase(null);
       setIsEditingExisting(!!socioId); // Re-evaluar basado en la prop
@@ -187,6 +220,7 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
       if (dbData) {
         // Si estamos en modo edición para un socio diferente, no sobrescribir
         if (socioId && dbData.id !== socioId) {
+          toast.warning('DNI ya registrado', { description: 'Este DNI ya está registrado por otro socio.' });
           setSubmitMessage({ type: 'warning', text: 'Este DNI ya está registrado por otro socio.' });
           setDniFoundInSupabase(true);
           setIsEditingExisting(false); // No estamos editando el socio actual
@@ -196,25 +230,27 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
           ...dbData,
           edad: dbData.edad || null,
           fechaNacimiento: formatDateForInput(dbData.fechaNacimiento),
-          situacionEconomica: dbData.situacionEconomica || 'Pobre',
+          situacionEconomica: dbData.situacionEconomica || undefined,
           dni: dbData.dni || null,
           celular: dbData.celular || null,
-          // genero: dbData.genero || null, // Eliminado
         });
         setIsEditingExisting(true); // Ahora estamos editando este socio existente
         setDniFoundInSupabase(true);
+        toast.success('Socio encontrado', { description: 'Datos existentes cargados para edición desde la base de datos.' });
         setSubmitMessage({ type: 'success', text: 'Datos existentes cargados para edición desde la base de datos.' });
       } else {
         // Limpiar otros campos, mantener DNI
-        form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, distritoDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, /* genero: null */ }); // Eliminado
+        form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, distritoDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, situacionEconomica: undefined });
         setIsEditingExisting(false); // Es un nuevo registro
         setDniFoundInSupabase(false);
+        toast.warning('DNI no encontrado', { description: 'DNI no encontrado en la base de datos. Puedes consultar RENIEC.' });
         setSubmitMessage({ type: 'warning', text: 'DNI no encontrado en la base de datos. Puedes consultar RENIEC.' });
       }
     } catch (error: any) {
       console.error('Error al buscar socio por DNI en Supabase:', error.message);
+      toast.error('Error al buscar DNI en DB', { description: error.message });
       setSubmitMessage({ type: 'error', text: `Error al buscar DNI en DB: ${error.message}` });
-      form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, /* genero: null */ }); // Eliminado
+      form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, situacionEconomica: undefined });
       setIsEditingExisting(false);
       setDniFoundInSupabase(null);
     } finally {
@@ -224,6 +260,7 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
 
   const searchDniInExternalApi = async (dni: string | null | undefined) => {
     if (!dni || dni.length !== 8) {
+      toast.error('DNI inválido', { description: 'Por favor, ingresa un DNI válido de 8 dígitos para consultar RENIEC.' });
       setSubmitMessage({ type: 'error', text: 'Por favor, ingresa un DNI válido de 8 dígitos para consultar RENIEC.' });
       return;
     }
@@ -250,12 +287,13 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
 
       if (!apiResponse.success) {
         if (apiResponse.message === 'No data found') {
+          toast.warning('DNI no encontrado', { description: 'DNI no encontrado en RENIEC.' });
           setSubmitMessage({ type: 'warning', text: 'DNI no encontrado en RENIEC.' });
         } else {
           throw new Error(apiResponse.message || 'Error al consultar RENIEC');
         }
         // Limpiar campos pero mantener DNI
-        form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, distritoDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, /* genero: null */ }); // Eliminado
+        form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, distritoDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, situacionEconomica: undefined });
         setIsEditingExisting(false);
         setDniFoundInSupabase(false);
         return;
@@ -264,8 +302,9 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
       let dniFromApi = String(apiResponse.data.number);
       if (!/^\d{8}$/.test(dniFromApi)) {
         console.log('Invalid DNI from API:', dniFromApi);
+        toast.error('DNI inválido', { description: 'El DNI retornado por RENIEC no es válido.' });
         setSubmitMessage({ type: 'error', text: 'El DNI retornado por RENIEC no es válido.' });
-        form.reset({ ...form.getValues(), dni: null });
+        form.reset({ ...form.getValues(), dni: null, situacionEconomica: undefined });
         setIsEditingExisting(false);
         setDniFoundInSupabase(false);
         return;
@@ -291,8 +330,7 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
         distritoVivienda: null,
         provinciaVivienda: null,
         regionVivienda: null,
-        situacionEconomica: 'Pobre',
-        // genero: null, // Eliminado
+        situacionEconomica: undefined,
       };
 
       form.reset({
@@ -302,12 +340,14 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
       });
       setIsEditingExisting(false); // Es un nuevo registro para Supabase (o se actualizará si el DNI coincide con uno existente)
       setDniFoundInSupabase(false); // Todavía no está en Supabase
+      toast.warning('DNI encontrado en RENIEC', { description: 'DNI encontrado en RENIEC. Registrando nuevo socio en la base de datos.' });
       setSubmitMessage({ type: 'warning', text: 'DNI encontrado en RENIEC. Registrando nuevo socio en la base de datos.' });
 
     } catch (error: any) {
       console.error('Error al consultar RENIEC:', error.message);
+      toast.error('Error al consultar RENIEC', { description: error.message });
       setSubmitMessage({ type: 'error', text: `Error al consultar RENIEC: ${error.message}` });
-      form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, /* genero: null */ }); // Eliminado
+      form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, situacionEconomica: undefined });
       setIsEditingExisting(false);
       setDniFoundInSupabase(false);
     } finally {
@@ -326,32 +366,49 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
     }
   };
 
-  const onSubmit = async (values: SocioTitularFormValues) => {
-    setSubmitMessage(null); // Limpiar mensajes previos
+  // Modified onSubmit to open confirmation dialog
+  const onSubmit = async (values: SocioTitularFormValues, event?: React.BaseSyntheticEvent) => {
+    event?.preventDefault(); // Explicitly prevent default form submission
+    setDataToConfirm(values);
+    setIsConfirmDialogOpen(true);
+  };
+
+  // NEW: Function to close *only* the confirmation dialog
+  const handleCloseConfirmationOnly = () => {
+    setIsConfirmDialogOpen(false);
+    setDataToConfirm(null);
+    setIsConfirmingSubmission(false);
+  };
+
+  // Function to handle actual submission after confirmation
+  const handleConfirmSubmit = async () => {
+    if (!dataToConfirm) return;
+
+    setIsConfirmingSubmission(true);
+    setSubmitMessage(null); // Clear previous messages
 
     try {
       const dataToSubmit: Partial<SocioTitularType> = {
-        nombres: values.nombres,
-        apellidoPaterno: values.apellidoPaterno,
-        apellidoMaterno: values.apellidoMaterno,
-        edad: values.edad,
-        dni: values.dni,
-        direccionDNI: values.direccionDNI,
-        distritoDNI: values.distritoDNI,
-        provinciaDNI: values.provinciaDNI,
-        regionDNI: values.regionDNI,
-        fechaNacimiento: formatDateForDB(values.fechaNacimiento), // Convertir a YYYY-MM-DD
-        celular: values.celular,
-        localidad: values.localidad,
-        situacionEconomica: values.situacionEconomica,
-        direccionVivienda: values.direccionVivienda,
-        mz: values.mz,
-        lote: values.lote,
-        ubicacionReferencia: values.ubicacionReferencia,
-        distritoVivienda: values.distritoVivienda,
-        provinciaVivienda: values.provinciaVivienda,
-        regionVivienda: values.regionVivienda,
-        // genero: values.genero, // Eliminado
+        nombres: dataToConfirm.nombres,
+        apellidoPaterno: dataToConfirm.apellidoPaterno,
+        apellidoMaterno: dataToConfirm.apellidoMaterno,
+        edad: dataToConfirm.edad,
+        dni: dataToConfirm.dni,
+        direccionDNI: dataToConfirm.direccionDNI,
+        distritoDNI: dataToConfirm.distritoDNI,
+        provinciaDNI: dataToConfirm.provinciaDNI,
+        regionDNI: dataToConfirm.regionDNI,
+        fechaNacimiento: formatDateForDB(dataToConfirm.fechaNacimiento), // Convertir a YYYY-MM-DD
+        celular: dataToConfirm.celular,
+        localidad: dataToConfirm.localidad,
+        situacionEconomica: dataToConfirm.situacionEconomica,
+        direccionVivienda: dataToConfirm.direccionVivienda,
+        mz: dataToConfirm.mz,
+        lote: dataToConfirm.lote,
+        ubicacionReferencia: dataToConfirm.ubicacionReferencia,
+        distritoVivienda: dataToConfirm.distritoVivienda,
+        provinciaVivienda: dataToConfirm.provinciaVivienda,
+        regionVivienda: dataToConfirm.regionVivienda,
       };
 
       // Asegurar que las cadenas vacías se conviertan a nulo para Supabase
@@ -376,7 +433,7 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
         const { data: existingSocio, error: existingError } = await supabase
           .from('socio_titulares')
           .select('id')
-          .eq('dni', values.dni)
+          .eq('dni', dataToConfirm.dni)
           .single();
 
         if (existingError && existingError.code !== 'PGRST116') {
@@ -384,7 +441,9 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
         }
 
         if (existingSocio) {
+          toast.error('DNI ya registrado', { description: 'Ya existe un socio registrado con este DNI.' });
           setSubmitMessage({ type: 'error', text: 'Ya existe un socio registrado con este DNI.' });
+          setIsConfirmingSubmission(false);
           return;
         }
 
@@ -401,48 +460,34 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
       }
 
       console.log('Formulario enviado y datos guardados en Supabase:', data);
+      toast.success('Socio Titular guardado', { description: `Formulario ${isEditingExisting ? 'actualizado' : 'enviado'} con éxito y datos guardados.` });
       setSubmitMessage({ type: 'success', text: `Formulario ${isEditingExisting ? 'actualizado' : 'enviado'} con éxito y datos guardados.` });
+      
       onSuccess(); // Llamar al callback onSuccess
-      onClose(); // Cerrar el diálogo
+
+      if (isEditingExisting) {
+        onClose(); // Close the main dialog for edits
+      } else {
+        // For new registrations: keep main dialog open, just reset form and close confirmation
+        form.reset({
+          nombres: '', apellidoPaterno: '', apellidoMaterno: '', dni: null, edad: null,
+          direccionDNI: null, distritoDNI: null, provinciaDNI: null, regionDNI: null,
+          fechaNacimiento: null, celular: null, localidad: null, direccionVivienda: null,
+          mz: null, lote: null, ubicacionReferencia: null, distritoVivienda: null,
+          provinciaVivienda: null, regionVivienda: null, situacionEconomica: undefined,
+        });
+        setDniFoundInSupabase(null); // Reset DNI status for new entry
+        handleCloseConfirmationOnly(); // Close only the confirmation dialog
+      }
+
     } catch (error: any) {
       console.error('Error al enviar el formulario a Supabase:', error.message);
+      toast.error('Error al guardar datos', { description: error.message });
       setSubmitMessage({ type: 'error', text: `Error al guardar los datos: ${error.message}` });
+    } finally {
+      setIsConfirmingSubmission(false);
     }
   };
-
-  const renderInputField = (
-    label: string,
-    name: keyof SocioTitularFormValues,
-    type: string = 'text',
-    placeholder: string = '',
-    pattern?: string,
-    onBlurHandler?: () => void,
-    isRequired: boolean = true
-  ) => (
-    <div className="grid gap-2">
-      <Label htmlFor={name} className="text-textSecondary">
-        {label} {isRequired && <span className="text-error">*</span>}
-      </Label>
-      <div className="relative">
-        <Input
-          id={name}
-          type={type}
-          placeholder={placeholder}
-          {...register(name)}
-          onBlur={onBlurHandler}
-          className={cn(
-            "rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300",
-            errors[name] && "border-error focus:ring-error focus:border-error"
-          )}
-          pattern={pattern}
-        />
-        {name === 'dni' && isLoadingDni && (
-          <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />
-        )}
-      </div>
-      {errors[name] && <p className="text-error text-sm mt-1">{errors[name]?.message}</p>}
-    </div>
-  );
 
   return (
     <div className="w-full">
@@ -529,7 +574,6 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
               {renderInputField('Provincia (DNI)', 'provinciaDNI', 'text', 'Ej: Lima')}
               {renderInputField('Distrito (DNI)', 'distritoDNI', 'text', 'Ej: Miraflores')}
               {renderInputField('Celular', 'celular', 'text', 'Ej: 987654321', '\\d{9}', undefined, false)}
-              {/* Eliminado el campo de Género */}
             </div>
           </section>
         )}
@@ -557,7 +601,7 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
           </h2>
           <div className="mb-6">
             <Label className="block text-textSecondary text-sm font-medium mb-2">
-              Situación Económica
+              Situación Económica <span className="text-error">*</span>
             </Label>
             <div className="flex flex-wrap gap-4">
               {ECONOMIC_SITUATIONS.map(option => (
@@ -587,6 +631,15 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
           </div>
         )}
         <div className="flex justify-end animate-fade-in delay-300">
+          {activeTab === 'personal' && (
+            <Button
+              type="button" // Important: prevent default form submission
+              onClick={() => setActiveTab('housing')}
+              className="px-8 py-3 bg-secondary text-white font-bold rounded-xl shadow-lg hover:bg-secondary/90 focus:outline-none focus:ring-4 focus:ring-secondary/50 transition-all duration-300 transform hover:scale-105 mr-4"
+            >
+              Siguiente: Datos de Vivienda
+            </Button>
+          )}
           <Button
             type="submit"
             className="px-8 py-3 bg-primary text-white font-bold rounded-xl shadow-lg hover:bg-primary/90 focus:outline-none focus:ring-4 focus:ring-primary/50 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -600,6 +653,18 @@ const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> 
           </Button>
         </div>
       </form>
+
+      {/* Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={isConfirmDialogOpen}
+        onClose={handleCloseConfirmationOnly}
+        onConfirm={handleConfirmSubmit}
+        title={isEditingExisting ? 'Confirmar Edición de Socio' : 'Confirmar Nuevo Socio'}
+        description="Por favor, revisa los detalles del socio antes de confirmar el registro."
+        data={dataToConfirm || {}}
+        confirmButtonText={isEditingExisting ? 'Confirmar Actualización' : 'Confirmar Registro'}
+        isConfirming={isConfirmingSubmission}
+      />
     </div>
   );
 };

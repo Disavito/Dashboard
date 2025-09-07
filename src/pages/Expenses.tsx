@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ColumnDef } from '@tanstack/react-table';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PlusCircle, Edit, ArrowUpDown } from 'lucide-react';
+import { PlusCircle, Edit, ArrowUpDown, CalendarIcon } from 'lucide-react'; // Added CalendarIcon
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui-custom/DataTable';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -12,11 +12,18 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useSupabaseData } from '@/hooks/useSupabaseData';
-import { Gasto as GastoType, Colaborador } from '@/lib/types';
+import { Gasto as GastoType, Colaborador, Cuenta } from '@/lib/types'; // Import Cuenta
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { toast } from 'sonner';
+import ConfirmationDialog from '@/components/ui-custom/ConfirmationDialog';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'; // New import
+import { Calendar } from '@/components/ui/calendar'; // New import
+import { cn } from '@/lib/utils'; // New import
+import { FormField, FormItem, FormLabel, FormControl, FormMessage, Form } from '@/components/ui/form'; // New import
+
 
 // --- Form Schema for Gasto ---
 const expenseFormSchema = z.object({
@@ -113,14 +120,21 @@ const expenseColumns: ColumnDef<GastoType>[] = [
 ];
 
 const expenseCategories = ['Alquiler', 'Comida', 'Transporte', 'Servicios', 'Entretenimiento', 'Salud', 'Educación', 'Software', 'Oficina', 'Otros'];
-const accounts = ['Caja Principal', 'Banco Ahorros', 'Tarjeta Crédito']; // Example accounts
+// const accounts = ['Caja Principal', 'Banco Ahorros', 'Tarjeta Crédito']; // Example accounts - REMOVED
 
 function Expenses() {
   const { data: expenseData, loading, error, addRecord, updateRecord, deleteRecord } = useSupabaseData<GastoType>({ tableName: 'gastos' });
   const { data: colaboradoresData } = useSupabaseData<Colaborador>({ tableName: 'colaboradores', enabled: true }); // Enabled to fetch data for dropdown
+  const { data: accountsData, loading: accountsLoading, error: accountsError } = useSupabaseData<Cuenta>({ tableName: 'cuentas' }); // Fetch accounts
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<GastoType | null>(null);
   const [globalFilter, setGlobalFilter] = useState(''); // Estado para el filtro global
+
+  // State for confirmation dialog
+  const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
+  const [dataToConfirm, setDataToConfirm] = useState<ExpenseFormValues | null>(null);
+  const [isConfirmingSubmission, setIsConfirmingSubmission] = useState(false);
+
 
   const form = useForm<ExpenseFormValues>({
     resolver: zodResolver(expenseFormSchema),
@@ -135,6 +149,16 @@ function Expenses() {
       colaborador_id: null,
     },
   });
+
+  // Fetch accounts from Supabase
+  const availableAccounts = accountsData.map(account => account.name);
+
+  // NEW: Function to close *only* the confirmation dialog
+  const handleCloseConfirmationOnly = () => {
+    setIsConfirmDialogOpen(false);
+    setDataToConfirm(null);
+    setIsConfirmingSubmission(false);
+  };
 
   const handleOpenDialog = (expense?: GastoType) => {
     setEditingExpense(expense || null);
@@ -165,23 +189,59 @@ function Expenses() {
   };
 
   const handleCloseDialog = () => {
-    setIsDialogOpen(false);
+    setIsDialogOpen(false); // This closes the main dialog
     setEditingExpense(null);
-    form.reset();
+    form.reset(); // Clears form fields
+    handleCloseConfirmationOnly(); // Also ensure confirmation dialog is closed and data cleared
   };
 
-  const onSubmit = async (values: ExpenseFormValues) => {
-    if (editingExpense) {
-      await updateRecord(editingExpense.id, values);
-    } else {
-      await addRecord(values);
+  // Modified onSubmit to open confirmation dialog
+  const onSubmit = async (values: ExpenseFormValues, event?: React.BaseSyntheticEvent) => {
+    event?.preventDefault(); // Explicitly prevent default form submission
+    setDataToConfirm(values);
+    setIsConfirmDialogOpen(true);
+  };
+
+  // Function to handle actual submission after confirmation
+  const handleConfirmSubmit = async () => {
+    if (!dataToConfirm) return;
+
+    setIsConfirmingSubmission(true);
+    try {
+      if (editingExpense) {
+        await updateRecord(editingExpense.id, dataToConfirm);
+        toast.success('Gasto actualizado', { description: 'El gasto ha sido actualizado exitosamente.' });
+        handleCloseDialog(); // Close main dialog for edits
+      } else {
+        await addRecord(dataToConfirm);
+        toast.success('Gasto añadido', { description: 'El nuevo gasto ha sido registrado exitosamente.' });
+        
+        // For new entries: reset form, close confirmation dialog, but keep main dialog open
+        form.reset({
+          amount: 0,
+          account: '',
+          date: format(new Date(), 'yyyy-MM-dd'),
+          category: '',
+          sub_category: null,
+          description: '',
+          numero_gasto: null,
+          colaborador_id: null,
+        });
+        setEditingExpense(null); // Clear editing state
+        handleCloseConfirmationOnly(); // Close only the confirmation dialog
+      }
+    } catch (submitError: any) {
+      console.error('Error al guardar el gasto:', submitError.message);
+      toast.error('Error al guardar gasto', { description: submitError.message });
+    } finally {
+      setIsConfirmingSubmission(false);
     }
-    handleCloseDialog();
   };
 
   const handleDelete = async (id: string) => { // Gasto ID is string (UUID)
     if (window.confirm('¿Estás seguro de que quieres eliminar este gasto?')) {
       await deleteRecord(id);
+      toast.success('Gasto eliminado', { description: 'El gasto ha sido eliminado exitosamente.' });
     }
   };
 
@@ -216,12 +276,16 @@ function Expenses() {
     return col;
   });
 
-  if (loading) {
-    return <div className="text-center text-muted-foreground">Cargando gastos...</div>;
+  if (loading || accountsLoading) { // Added accountsLoading
+    return <div className="text-center text-muted-foreground">Cargando gastos y cuentas...</div>;
   }
 
   if (error) {
     return <div className="text-center text-destructive">Error al cargar gastos: {error}</div>;
+  }
+
+  if (accountsError) { // Handle accountsError
+    return <div className="text-center text-destructive">Error al cargar cuentas: {accountsError}</div>;
   }
 
   return (
@@ -258,130 +322,174 @@ function Expenses() {
               {editingExpense ? 'Realiza cambios en el gasto existente aquí.' : 'Añade un nuevo registro de gasto a tu sistema.'}
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="amount" className="text-right text-textSecondary">
-                Monto
-              </Label>
-              <Input
-                id="amount"
-                type="number"
-                step="0.01"
-                {...form.register('amount')}
-                className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+          <Form {...form}> {/* Wrap the form with the Form component */}
+            <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4 py-4">
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="amount" className="text-right text-textSecondary">
+                  Monto
+                </Label>
+                <Input
+                  id="amount"
+                  type="number"
+                  step="0.01"
+                  {...form.register('amount')}
+                  className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+                  placeholder="0.00" // Added placeholder
+                />
+                {form.formState.errors.amount && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.amount.message}</p>}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="account" className="text-right text-textSecondary">
+                  Cuenta
+                </Label>
+                <Select onValueChange={(value) => form.setValue('account', value)} value={form.watch('account')}>
+                  <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
+                    <SelectValue placeholder="Selecciona una cuenta" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border rounded-lg shadow-lg">
+                    {availableAccounts.length > 0 ? ( // Use availableAccounts
+                      availableAccounts.map(account => (
+                        <SelectItem key={account} value={account} className="hover:bg-muted/50 cursor-pointer">
+                          {account}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="no-accounts" disabled>No hay cuentas disponibles</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+                {form.formState.errors.account && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.account.message}</p>}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="category" className="text-right text-textSecondary">
+                  Categoría
+                </Label>
+                <Select onValueChange={(value) => form.setValue('category', value)} value={form.watch('category')}>
+                  <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
+                    <SelectValue placeholder="Selecciona una categoría" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border rounded-lg shadow-lg">
+                    {expenseCategories.map(category => (
+                      <SelectItem key={category} value={category} className="hover:bg-muted/50 cursor-pointer">
+                        {category}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.formState.errors.category && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.category.message}</p>}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="sub_category" className="text-right text-textSecondary">
+                  Subcategoría (Opcional)
+                </Label>
+                <Input
+                  id="sub_category"
+                  {...form.register('sub_category')}
+                  className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+                />
+                {form.formState.errors.sub_category && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.sub_category.message}</p>}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="description" className="text-right text-textSecondary">
+                  Descripción
+                </Label>
+                <Textarea
+                  id="description"
+                  {...form.register('description')}
+                  className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+                />
+                {form.formState.errors.description && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.description.message}</p>}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="numero_gasto" className="text-right text-textSecondary">
+                  Nº Gasto (Opcional)
+                </Label>
+                <Input
+                  id="numero_gasto"
+                  {...form.register('numero_gasto')}
+                  className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+                />
+                {form.formState.errors.numero_gasto && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.numero_gasto.message}</p>}
+              </div>
+              <div className="grid grid-cols-4 items-center gap-4">
+                <Label htmlFor="colaborador_id" className="text-right text-textSecondary">
+                  Colaborador (Opcional)
+                </Label>
+                <Select onValueChange={(value) => form.setValue('colaborador_id', value)} value={form.watch('colaborador_id') || ''}>
+                  <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
+                    <SelectValue placeholder="Selecciona un colaborador" />
+                  </SelectTrigger>
+                  <SelectContent className="bg-card border-border rounded-lg shadow-lg">
+                    {colaboradoresData.map(colaborador => (
+                      <SelectItem key={colaborador.id} value={colaborador.id} className="hover:bg-muted/50 cursor-pointer">
+                        {colaborador.name} {colaborador.apellidos} {/* Updated to use 'name' and 'apellidos' */}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {form.formState.errors.colaborador_id && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.colaborador_id.message}</p>}
+              </div>
+              <FormField
+                control={form.control}
+                name="date"
+                render={({ field }) => (
+                  <FormItem className="grid grid-cols-4 items-center gap-4">
+                    <FormLabel className="text-right text-textSecondary">Fecha</FormLabel>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <FormControl>
+                          <Button
+                            variant={"outline"}
+                            className={cn(
+                              "col-span-3 w-full justify-start text-left font-normal rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300",
+                              !field.value && "text-muted-foreground"
+                            )}
+                          >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {field.value ? format(parseISO(field.value), "PPP", { locale: es }) : <span>Selecciona una fecha</span>}
+                          </Button>
+                        </FormControl>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0 bg-card border-border rounded-xl shadow-lg" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={field.value ? parseISO(field.value) : undefined}
+                          onSelect={(date) => {
+                            field.onChange(date ? format(date, 'yyyy-MM-dd') : '');
+                          }}
+                          initialFocus
+                          locale={es}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <FormMessage className="col-span-4 text-right" />
+                  </FormItem>
+                )}
               />
-              {form.formState.errors.amount && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.amount.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="account" className="text-right text-textSecondary">
-                Cuenta
-              </Label>
-              <Select onValueChange={(value) => form.setValue('account', value)} value={form.watch('account')}>
-                <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
-                  <SelectValue placeholder="Selecciona una cuenta" />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border rounded-lg shadow-lg">
-                  {accounts.map(account => (
-                    <SelectItem key={account} value={account} className="hover:bg-muted/50 cursor-pointer">
-                      {account}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.account && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.account.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="category" className="text-right text-textSecondary">
-                Categoría
-              </Label>
-              <Select onValueChange={(value) => form.setValue('category', value)} value={form.watch('category')}>
-                <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
-                  <SelectValue placeholder="Selecciona una categoría" />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border rounded-lg shadow-lg">
-                  {expenseCategories.map(category => (
-                    <SelectItem key={category} value={category} className="hover:bg-muted/50 cursor-pointer">
-                      {category}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.category && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.category.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="sub_category" className="text-right text-textSecondary">
-                Subcategoría (Opcional)
-              </Label>
-              <Input
-                id="sub_category"
-                {...form.register('sub_category')}
-                className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-              />
-              {form.formState.errors.sub_category && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.sub_category.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="description" className="text-right text-textSecondary">
-                Descripción
-              </Label>
-              <Textarea
-                id="description"
-                {...form.register('description')}
-                className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-              />
-              {form.formState.errors.description && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.description.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="numero_gasto" className="text-right text-textSecondary">
-                Nº Gasto (Opcional)
-              </Label>
-              <Input
-                id="numero_gasto"
-                {...form.register('numero_gasto')}
-                className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-              />
-              {form.formState.errors.numero_gasto && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.numero_gasto.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="colaborador_id" className="text-right text-textSecondary">
-                Colaborador (Opcional)
-              </Label>
-              <Select onValueChange={(value) => form.setValue('colaborador_id', value)} value={form.watch('colaborador_id') || ''}>
-                <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
-                  <SelectValue placeholder="Selecciona un colaborador" />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border rounded-lg shadow-lg">
-                  {colaboradoresData.map(colaborador => (
-                    <SelectItem key={colaborador.id} value={colaborador.id} className="hover:bg-muted/50 cursor-pointer">
-                      {colaborador.name} {colaborador.apellidos} {/* Updated to use 'name' and 'apellidos' */}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {form.formState.errors.colaborador_id && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.colaborador_id.message}</p>}
-            </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="date" className="text-right text-textSecondary">
-                Fecha
-              </Label>
-              <Input
-                id="date"
-                type="date"
-                {...form.register('date')}
-                className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-              />
-              {form.formState.errors.date && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.date.message}</p>}
-            </div>
-            <DialogFooter className="mt-4">
-              <Button type="button" variant="outline" onClick={handleCloseDialog} className="rounded-lg border-border hover:bg-muted/50 transition-all duration-300">
-                Cancelar
-              </Button>
-              <Button type="submit" className="rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
-                {editingExpense ? 'Guardar Cambios' : 'Añadir Gasto'}
-              </Button>
-            </DialogFooter>
-          </form>
+              <DialogFooter className="mt-4">
+                <Button type="button" variant="outline" onClick={handleCloseDialog} className="rounded-lg border-border hover:bg-muted/50 transition-all duration-300">
+                  Cancelar
+                </Button>
+                <Button type="submit" className="rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
+                  {editingExpense ? 'Guardar Cambios' : 'Añadir Gasto'}
+                </Button>
+              </DialogFooter>
+            </form>
+          </Form>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmation Dialog */}
+      <ConfirmationDialog
+        isOpen={isConfirmDialogOpen}
+        onClose={handleCloseConfirmationOnly}
+        onConfirm={handleConfirmSubmit}
+        title={editingExpense ? 'Confirmar Edición de Gasto' : 'Confirmar Nuevo Gasto'}
+        description="Por favor, revisa los detalles del gasto antes de confirmar."
+        data={dataToConfirm || {}}
+        confirmButtonText={editingExpense ? 'Confirmar Actualización' : 'Confirmar Registro'}
+        isConfirming={isConfirmingSubmission}
+      />
     </div>
   );
 }
