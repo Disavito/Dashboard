@@ -1,672 +1,665 @@
-import React, { useState, useEffect } from 'react';
-import { User, Home, Loader2 } from 'lucide-react';
-import { useForm } from 'react-hook-form';
+import { useState, useEffect, useCallback } from 'react';
+import { useForm, FormProvider } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { supabase } from '@/lib/supabaseClient';
-import { ECONOMIC_SITUATIONS } from '@/lib/data/constants';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
-import { SocioTitular as SocioTitularType } from '@/lib/types';
-import { format, parse } from 'date-fns';
-import { cn } from '@/lib/utils';
+import { Textarea } from '@/components/ui/textarea';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from 'sonner';
+import { supabase } from '@/lib/supabaseClient';
+import { SocioTitular, EconomicSituationOption } from '@/lib/types';
+import { Loader2, CalendarIcon } from 'lucide-react';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { format, parseISO, differenceInYears } from 'date-fns';
+import { es } from 'date-fns/locale';
+import { cn } from '@/lib/utils';
+import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form';
 import ConfirmationDialog from '@/components/ui-custom/ConfirmationDialog';
+import { DialogFooter } from '@/components/ui/dialog';
+import axios from 'axios';
 
 
-const API_TOKEN = import.meta.env.VITE_CONSULTAS_PERU_API_TOKEN || 'bee07ff13163585f6a0d648bf7c1b13b9a2d7b2591139eab891';
-const API_URL = 'https://api.consultasperu.com/api/v1/query';
-
-// --- Form Schema ---
-const socioTitularFormSchema = z.object({
+// --- Zod Schemas ---
+const personalDataSchema = z.object({
   nombres: z.string().min(1, { message: 'Los nombres son requeridos.' }).max(255, { message: 'Los nombres son demasiado largos.' }),
   apellidoPaterno: z.string().min(1, { message: 'El apellido paterno es requerido.' }).max(255, { message: 'El apellido paterno es demasiado largo.' }),
   apellidoMaterno: z.string().min(1, { message: 'El apellido materno es requerido.' }).max(255, { message: 'El apellido materno es demasiado largo.' }),
-  dni: z.string().min(8, { message: 'El DNI debe tener 8 dígitos.' }).max(8, { message: 'El DNI debe tener 8 dígitos.' }).regex(/^\d{8}$/, { message: 'El DNI debe ser 8 dígitos numéricos.' }).optional().nullable(),
-  edad: z.preprocess(
-    (val) => (val === '' ? null : Number(val)),
-    z.number().int().positive({ message: 'La edad debe ser un número positivo.' }).min(18, { message: 'La edad mínima es 18.' }).max(99, { message: 'La edad máxima es 99.' }).optional().nullable()
-  ),
-  direccionDNI: z.string().optional().nullable(),
-  distritoDNI: z.string().optional().nullable(),
-  provinciaDNI: z.string().optional().nullable(),
-  regionDNI: z.string().optional().nullable(),
-  fechaNacimiento: z.string().optional().nullable(), // Expected DD/MM/YYYY from user, stored as YYYY-MM-DD
-  celular: z.string().optional().nullable(),
-  localidad: z.string().optional().nullable(),
+  dni: z.string().min(8, { message: 'El DNI debe tener 8 dígitos.' }).max(8, { message: 'El DNI debe tener 8 dígitos.' }).regex(/^\d{8}$/, { message: 'El DNI debe ser 8 dígitos numéricos.' }),
+  fechaNacimiento: z.string().min(1, { message: 'La fecha de nacimiento es requerida.' }),
+  edad: z.number().int().min(0, { message: 'La edad no puede ser negativa.' }).optional().nullable(), // Edad es calculada, no se valida directamente como requerida
+  celular: z.string().min(9, { message: 'El celular debe tener al menos 9 dígitos.' }).max(15, { message: 'El celular es demasiado largo.' }).regex(/^\d+$/, { message: 'El celular debe contener solo números.' }),
+  situacionEconomica: z.enum(['Pobre', 'Extremo Pobre'], { message: 'La situación económica es requerida.' }),
+  direccionDNI: z.string().min(1, { message: 'La dirección DNI es requerida.' }).max(255, { message: 'La dirección DNI es demasiado larga.' }), // Made required
+  regionDNI: z.string().min(1, { message: 'La región DNI es requerida.' }).max(255, { message: 'La región DNI es demasiado larga.' }), // Made required
+  provinciaDNI: z.string().min(1, { message: 'La provincia DNI es requerida.' }).max(255, { message: 'La provincia DNI es demasiado larga.' }), // Made required
+  distritoDNI: z.string().min(1, { message: 'El distrito DNI es requerido.' }).max(255, { message: 'El distrito DNI es demasiado larga.' }), // Made required
+  localidad: z.string().min(1, { message: 'La localidad es requerida.' }).max(255, { message: 'La localidad es demasiado larga.' }), // Moved from addressDataSchema and made required
+  genero: z.string().optional().nullable(),
+});
+
+const addressDataSchema = z.object({
+  regionVivienda: z.string().optional().nullable(),
+  provinciaVivienda: z.string().optional().nullable(),
+  distritoVivienda: z.string().optional().nullable(),
   direccionVivienda: z.string().optional().nullable(),
   mz: z.string().optional().nullable(),
   lote: z.string().optional().nullable(),
-  ubicacionReferencia: z.string().optional().nullable(),
-  distritoVivienda: z.string().optional().nullable(),
-  provinciaVivienda: z.string().optional().nullable(),
-  regionVivienda: z.string().optional().nullable(),
-  situacionEconomica: z.enum(['Pobre', 'Extremo Pobre'], { message: 'La situación económica es requerida.' }), // Made mandatory
 });
 
-type SocioTitularFormValues = z.infer<typeof socioTitularFormSchema>;
+const formSchema = z.intersection(personalDataSchema, addressDataSchema);
+
+type SocioTitularFormValues = z.infer<typeof formSchema>;
 
 interface SocioTitularRegistrationFormProps {
-  socioId?: string; // Optional ID for editing existing socio
-  onClose: () => void; // Callback para cerrar el diálogo
-  onSuccess: () => void; // Callback para una presentación exitosa
+  socioId?: string;
+  onClose: () => void;
+  onSuccess: () => void;
 }
 
-const SocioTitularRegistrationForm: React.FC<SocioTitularRegistrationFormProps> = ({ socioId, onClose, onSuccess }) => {
-  const [isLoadingDni, setIsLoadingDni] = useState<boolean>(false);
-  const [isEditingExisting, setIsEditingExisting] = useState<boolean>(!!socioId);
-  const [submitMessage, setSubmitMessage] = useState<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'personal' | 'housing'>('personal');
-  const [dniFoundInSupabase, setDniFoundInSupabase] = useState<boolean | null>(null);
+const economicSituationOptions: EconomicSituationOption[] = [
+  { value: 'Pobre', label: 'Pobre' },
+  { value: 'Extremo Pobre', label: 'Extremo Pobre' },
+];
 
-  // State for confirmation dialog
+const genderOptions = [
+  { value: 'Masculino', label: 'Masculino' },
+  { value: 'Femenino', label: 'Femenino' },
+  { value: 'Otro', label: 'Otro' },
+];
+
+// Helper function to calculate age
+const calculateAge = (dobString: string): number | null => {
+  if (!dobString) return null;
+  try {
+    const dob = parseISO(dobString);
+    return differenceInYears(new Date(), dob);
+  } catch (e) {
+    console.error("Error calculating age:", e);
+    return null;
+  }
+};
+
+function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitularRegistrationFormProps) {
+  const [activeTab, setActiveTab] = useState<'personal' | 'address'>('personal');
+  const [isDniSearching, setIsDniSearching] = useState(false);
+  const [isReniecSearching, setIsReniecSearching] = useState(false);
+
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
   const [dataToConfirm, setDataToConfirm] = useState<SocioTitularFormValues | null>(null);
   const [isConfirmingSubmission, setIsConfirmingSubmission] = useState(false);
 
-
   const form = useForm<SocioTitularFormValues>({
-    resolver: zodResolver(socioTitularFormSchema),
+    resolver: zodResolver(formSchema),
     defaultValues: {
       nombres: '',
       apellidoPaterno: '',
       apellidoMaterno: '',
-      dni: null,
+      dni: '',
+      fechaNacimiento: '',
       edad: null,
-      direccionDNI: null,
-      distritoDNI: null,
-      provinciaDNI: null,
-      regionDNI: null,
-      fechaNacimiento: null,
-      celular: null,
-      localidad: null,
-      direccionVivienda: null,
-      mz: null,
-      lote: null,
-      ubicacionReferencia: null,
-      distritoVivienda: null,
-      provinciaVivienda: null,
-      regionVivienda: null,
-      situacionEconomica: undefined, // No default selected value
+      celular: '',
+      situacionEconomica: undefined,
+      direccionDNI: '',
+      regionDNI: '',
+      provinciaDNI: '',
+      distritoDNI: '',
+      localidad: '',
+      genero: undefined,
+      
+      regionVivienda: '',
+      provinciaVivienda: '',
+      distritoVivienda: '',
+      direccionVivienda: '',
+      mz: '',
+      lote: '',
     },
   });
 
-  const { handleSubmit, register, watch, formState: { errors, isSubmitting } } = form;
+  const { handleSubmit, setValue, watch, reset, register, control, formState: { errors } } = form;
+  const watchedDni = watch('dni');
+  const watchedFechaNacimiento = watch('fechaNacimiento');
 
-  // --- Helper function to render form input fields ---
-  const renderInputField = (
-    label: string,
-    name: keyof SocioTitularFormValues,
-    type: React.HTMLInputTypeAttribute,
-    placeholder?: string,
-    pattern?: string, // This will be passed as HTML pattern attribute
-    onBlur?: () => void,
-    required: boolean = true
-  ) => (
-    <div className="grid w-full items-center gap-1.5">
-      <Label htmlFor={name} className="text-textSecondary">
-        {label} {required && <span className="text-error">*</span>}
-      </Label>
-      <Input
-        id={name}
-        type={type}
-        placeholder={placeholder}
-        {...form.register(name, { onBlur: onBlur })} // onBlur is handled here
-        pattern={pattern} // Pass pattern directly to Input component
-        className="rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-      />
-      {errors[name] && <p className="text-error text-sm mt-1">{errors[name]?.message}</p>}
-    </div>
-  );
-
-  // --- Date Formatting Helpers ---
-  const formatDateForInput = (dateString: string | null | undefined): string | null => {
-    if (!dateString) return null;
-    try {
-      // Assuming dateString from DB is YYYY-MM-DD
-      const date = parse(dateString, 'yyyy-MM-dd', new Date());
-      return format(date, 'dd/MM/yyyy');
-    } catch (e) {
-      console.error("Error parsing date for input:", dateString, e);
-      return dateString; // Return original if parsing fails
-    }
-  };
-
-  const formatDateForDB = (dateString: string | null | undefined): string | null => {
-    if (!dateString) return null;
-    try {
-      // Assuming dateString from input is DD/MM/YYYY
-      const date = parse(dateString, 'dd/MM/yyyy', new Date());
-      return format(date, 'yyyy-MM-DD');
-    } catch (e) {
-      console.error("Error parsing date for DB:", dateString, e);
-      return dateString; // Return original if parsing fails
-    }
-  };
-
-  // --- Load existing data for editing ---
   useEffect(() => {
-    setIsEditingExisting(!!socioId); // Actualizar el estado de edición cuando la prop socioId cambia
-    const loadSocioData = async () => {
-      if (!socioId) {
-        form.reset({ // Resetear el formulario si no hay socioId (para nuevo registro)
-          nombres: '', apellidoPaterno: '', apellidoMaterno: '', dni: null, edad: null,
-          direccionDNI: null, distritoDNI: null, provinciaDNI: null, regionDNI: null,
-          fechaNacimiento: null, celular: null, localidad: null, direccionVivienda: null,
-          mz: null, lote: null, ubicacionReferencia: null, distritoVivienda: null,
-          provinciaVivienda: null, regionVivienda: null, situacionEconomica: undefined,
-        });
-        setDniFoundInSupabase(null);
-        setSubmitMessage(null);
-        return;
-      }
-
-      const { data, error } = await supabase
-        .from('socio_titulares')
-        .select('*')
-        .eq('id', socioId)
-        .single();
-
-      if (error) {
-        console.error('Error loading socio data:', error.message);
-        toast.error('Error al cargar datos del socio', { description: error.message });
-        setSubmitMessage({ type: 'error', text: `Error al cargar datos del socio: ${error.message}` });
-        return;
-      }
-
-      if (data) {
-        form.reset({
-          ...data,
-          edad: data.edad || null,
-          fechaNacimiento: formatDateForInput(data.fechaNacimiento),
-          situacionEconomica: data.situacionEconomica || undefined,
-          dni: data.dni || null,
-          celular: data.celular || null,
-        });
-        setDniFoundInSupabase(true); // DNI encontrado en la DB
-        setSubmitMessage(null); // Limpiar mensajes al cargar exitosamente
-      }
-    };
-
-    loadSocioData();
-  }, [socioId, form]);
-
-  const currentDni = watch('dni');
-
-  const searchDniInSupabase = async (dni: string | null | undefined) => {
-    if (!dni || dni.length !== 8) {
-      toast.warning('DNI inválido', { description: 'Por favor, ingresa un DNI válido de 8 dígitos.' });
-      setSubmitMessage({ type: 'warning', text: 'Por favor, ingresa un DNI válido de 8 dígitos.' });
-      setDniFoundInSupabase(null);
-      setIsEditingExisting(!!socioId); // Re-evaluar basado en la prop
-      return;
+    if (watchedFechaNacimiento) {
+      const calculatedAge = calculateAge(watchedFechaNacimiento);
+      setValue('edad', calculatedAge);
+    } else {
+      setValue('edad', null);
     }
+  }, [watchedFechaNacimiento, setValue]);
 
-    setIsLoadingDni(true);
-    setSubmitMessage(null);
 
-    try {
-      const { data: dbData, error: dbError } = await supabase
-        .from('socio_titulares')
-        .select('*')
-        .eq('dni', dni)
-        .single();
-
-      if (dbError && dbError.code !== 'PGRST116') { // PGRST116 significa "no se encontraron filas"
-        throw dbError;
-      }
-
-      if (dbData) {
-        // Si estamos en modo edición para un socio diferente, no sobrescribir
-        if (socioId && dbData.id !== socioId) {
-          toast.warning('DNI ya registrado', { description: 'Este DNI ya está registrado por otro socio.' });
-          setSubmitMessage({ type: 'warning', text: 'Este DNI ya está registrado por otro socio.' });
-          setDniFoundInSupabase(true);
-          setIsEditingExisting(false); // No estamos editando el socio actual
-          return;
-        }
-        form.reset({
-          ...dbData,
-          edad: dbData.edad || null,
-          fechaNacimiento: formatDateForInput(dbData.fechaNacimiento),
-          situacionEconomica: dbData.situacionEconomica || undefined,
-          dni: dbData.dni || null,
-          celular: dbData.celular || null,
-        });
-        setIsEditingExisting(true); // Ahora estamos editando este socio existente
-        setDniFoundInSupabase(true);
-        toast.success('Socio encontrado', { description: 'Datos existentes cargados para edición desde la base de datos.' });
-        setSubmitMessage({ type: 'success', text: 'Datos existentes cargados para edición desde la base de datos.' });
-      } else {
-        // Limpiar otros campos, mantener DNI
-        form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, distritoDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, situacionEconomica: undefined });
-        setIsEditingExisting(false); // Es un nuevo registro
-        setDniFoundInSupabase(false);
-        toast.warning('DNI no encontrado', { description: 'DNI no encontrado en la base de datos. Puedes consultar RENIEC.' });
-        setSubmitMessage({ type: 'warning', text: 'DNI no encontrado en la base de datos. Puedes consultar RENIEC.' });
-      }
-    } catch (error: any) {
-      console.error('Error al buscar socio por DNI en Supabase:', error.message);
-      toast.error('Error al buscar DNI en DB', { description: error.message });
-      setSubmitMessage({ type: 'error', text: `Error al buscar DNI en DB: ${error.message}` });
-      form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, situacionEconomica: undefined });
-      setIsEditingExisting(false);
-      setDniFoundInSupabase(null);
-    } finally {
-      setIsLoadingDni(false);
-    }
+  const renderInputField = (
+    id: keyof SocioTitularFormValues,
+    label: string,
+    placeholder: string,
+    type: string = 'text',
+    readOnly: boolean = false,
+    isSearching: boolean = false,
+    onBlur?: () => void
+  ) => {
+    return (
+      <div className="grid grid-cols-4 items-center gap-4">
+        <Label htmlFor={id} className="text-right text-textSecondary">
+          {label}
+        </Label>
+        <div className="col-span-3 relative">
+          <Input
+            id={id}
+            type={type}
+            {...register(id, { valueAsNumber: id === 'edad' ? true : false })}
+            className="rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+            placeholder={placeholder}
+            readOnly={readOnly}
+            onBlur={onBlur}
+          />
+          {isSearching && (
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />
+          )}
+        </div>
+        {errors[id] && <p className="col-span-4 text-right text-error text-sm">{errors[id]?.message}</p>}
+      </div>
+    );
   };
 
-  const searchDniInExternalApi = async (dni: string | null | undefined) => {
-    if (!dni || dni.length !== 8) {
-      toast.error('DNI inválido', { description: 'Por favor, ingresa un DNI válido de 8 dígitos para consultar RENIEC.' });
-      setSubmitMessage({ type: 'error', text: 'Por favor, ingresa un DNI válido de 8 dígitos para consultar RENIEC.' });
+  const renderTextareaField = (
+    id: keyof SocioTitularFormValues,
+    label: string,
+    placeholder: string,
+    readOnly: boolean = false,
+    isSearching: boolean = false
+  ) => {
+    return (
+      <div className="grid grid-cols-4 items-center gap-4">
+        <Label htmlFor={id} className="text-right text-textSecondary">
+          {label}
+        </Label>
+        <div className="col-span-3 relative">
+          <Textarea
+            id={id}
+            {...register(id)}
+            className="flex-grow rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+            placeholder={placeholder}
+            readOnly={readOnly}
+          />
+          {isSearching && (
+            <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />
+          )}
+        </div>
+        {errors[id] && <p className="col-span-4 text-right text-error text-sm">{errors[id]?.message}</p>}
+      </div>
+    );
+  };
+
+  const renderRadioGroupField = (
+    id: keyof SocioTitularFormValues,
+    label: string,
+    options: { value: string; label: string }[]
+  ) => {
+    return (
+      <FormField
+        control={control}
+        name={id}
+        render={({ field }) => (
+          <FormItem className="grid grid-cols-4 items-center gap-4">
+            <FormLabel className="text-right text-textSecondary">{label}</FormLabel>
+            <FormControl className="col-span-3">
+              <RadioGroup
+                onValueChange={field.onChange}
+                value={field.value as string}
+                className="flex flex-row space-x-4"
+              >
+                {options.map(option => (
+                  <div key={option.value} className="flex items-center space-x-2">
+                    <RadioGroupItem value={option.value} id={`${id}-${option.value}`} />
+                    <Label htmlFor={`${id}-${option.value}`}>{option.label}</Label>
+                  </div>
+                ))}
+              </RadioGroup>
+            </FormControl>
+            {errors[id] && <FormMessage className="col-span-4 text-right">{errors[id]?.message}</FormMessage>}
+          </FormItem>
+        )}
+      />
+    );
+  };
+
+  const handleReniecSearch = useCallback(async () => {
+    console.log('handleReniecSearch called');
+
+    if (!watchedDni || watchedDni.length !== 8) {
+      console.log('DNI invalid or not 8 digits:', watchedDni);
+      toast.error('DNI inválido', { description: 'Por favor, ingresa un DNI de 8 dígitos.' });
       return;
     }
 
-    setIsLoadingDni(true);
-    setSubmitMessage(null);
+    setIsReniecSearching(true);
+    console.log('setIsReniecSearching(true)');
 
     try {
-      const response = await fetch(API_URL, {
-        method: 'POST',
+      const token = import.meta.env.VITE_CONSULTAS_PERU_API_TOKEN;
+      console.log('Reniec API Token:', token ? 'Loaded' : 'NOT LOADED');
+      if (!token) {
+        throw new Error('VITE_CONSULTAS_PERU_API_TOKEN no está configurado en el archivo .env');
+      }
+
+      const apiUrl = `https://api.consultasperu.com/api/v1/query`;
+      console.log('Reniec API URL:', apiUrl);
+
+      const requestBody = {
+        token: token,
+        type_document: "dni",
+        document_number: watchedDni,
+      };
+      console.log('Reniec API Request Body:', requestBody);
+
+      const response = await axios.post(apiUrl, requestBody, {
         headers: {
           'Content-Type': 'application/json',
-          'Accept': 'application/json',
         },
-        body: JSON.stringify({
-          token: API_TOKEN,
-          type_document: 'dni',
-          document_number: dni,
-        }),
       });
+      console.log('Reniec API Raw Response:', response);
+      const data = response.data.data;
+      console.log('Reniec API Parsed Data (response.data.data):', data);
 
-      const apiResponse = await response.json();
-      console.log('Raw API Response from external API (RENIEC):', apiResponse);
 
-      if (!apiResponse.success) {
-        if (apiResponse.message === 'No data found') {
-          toast.warning('DNI no encontrado', { description: 'DNI no encontrado en RENIEC.' });
-          setSubmitMessage({ type: 'warning', text: 'DNI no encontrado en RENIEC.' });
-        } else {
-          throw new Error(apiResponse.message || 'Error al consultar RENIEC');
-        }
-        // Limpiar campos pero mantener DNI
-        form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, distritoDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, situacionEconomica: undefined });
-        setIsEditingExisting(false);
-        setDniFoundInSupabase(false);
-        return;
+      if (response.data && response.data.success && data) {
+        console.log('Reniec API Success. Populating fields.');
+        setValue('nombres', data.name || '');
+        const surnames = data.surname ? data.surname.split(' ') : [];
+        setValue('apellidoPaterno', surnames[0] || '');
+        setValue('apellidoMaterno', surnames[1] || '');
+        setValue('fechaNacimiento', data.date_of_birth || '');
+        setValue('celular', '');
+        setValue('direccionDNI', data.address || '');
+        setValue('regionDNI', data.department || '');
+        setValue('provinciaDNI', data.province || '');
+        setValue('distritoDNI', data.district || '');
+        setValue('localidad', data.district || ''); // Mapped to new 'localidad' field
+
+        toast.success('Datos Reniec encontrados', { description: `Nombre: ${data.name} ${data.surname}` });
+      } else {
+        console.log('Reniec API No data found or unsuccessful response.');
+        toast.warning('DNI no encontrado en Reniec', { description: response.data.message || 'No se encontraron datos para el DNI proporcionado.' });
+        setValue('nombres', '');
+        setValue('apellidoPaterno', '');
+        setValue('apellidoMaterno', '');
+        setValue('fechaNacimiento', '');
+        setValue('edad', null);
+        setValue('celular', '');
+        setValue('direccionDNI', '');
+        setValue('regionDNI', '');
+        setValue('provinciaDNI', '');
+        setValue('distritoDNI', '');
+        setValue('localidad', ''); // Clear new 'localidad' field
       }
-
-      let dniFromApi = String(apiResponse.data.number);
-      if (!/^\d{8}$/.test(dniFromApi)) {
-        console.log('Invalid DNI from API:', dniFromApi);
-        toast.error('DNI inválido', { description: 'El DNI retornado por RENIEC no es válido.' });
-        setSubmitMessage({ type: 'error', text: 'El DNI retornado por RENIEC no es válido.' });
-        form.reset({ ...form.getValues(), dni: null, situacionEconomica: undefined });
-        setIsEditingExisting(false);
-        setDniFoundInSupabase(false);
-        return;
-      }
-
-      const apiMappedData: Partial<SocioTitularFormValues> = {
-        nombres: apiResponse.data.name || '',
-        apellidoPaterno: apiResponse.data.surname?.split(' ')[0] || '',
-        apellidoMaterno: apiResponse.data.surname?.split(' ')[1] || '',
-        direccionDNI: apiResponse.data.address || '',
-        distritoDNI: apiResponse.data.district || '',
-        provinciaDNI: apiResponse.data.province || '',
-        regionDNI: apiResponse.data.department || '',
-        fechaNacimiento: formatDateForInput(apiResponse.data.date_of_birth) || '', // Convertir YYYY-MM-DD a DD/MM/YYYY
-        dni: dniFromApi,
-        celular: null, // La API no lo proporciona, mantener nulo
-        localidad: null, // La API no lo proporciona, mantener nulo
-        edad: null, // La API no lo proporciona, mantener nulo
-        direccionVivienda: null,
-        mz: null,
-        lote: null,
-        ubicacionReferencia: null,
-        distritoVivienda: null,
-        provinciaVivienda: null,
-        regionVivienda: null,
-        situacionEconomica: undefined,
-      };
-
-      form.reset({
-        ...form.getValues(), // Mantener los valores existentes para los campos que no provienen de la API
-        ...apiMappedData,
-        dni: dniFromApi, // Asegurar que el DNI se establece desde la API
-      });
-      setIsEditingExisting(false); // Es un nuevo registro para Supabase (o se actualizará si el DNI coincide con uno existente)
-      setDniFoundInSupabase(false); // Todavía no está en Supabase
-      toast.warning('DNI encontrado en RENIEC', { description: 'DNI encontrado en RENIEC. Registrando nuevo socio en la base de datos.' });
-      setSubmitMessage({ type: 'warning', text: 'DNI encontrado en RENIEC. Registrando nuevo socio en la base de datos.' });
-
     } catch (error: any) {
-      console.error('Error al consultar RENIEC:', error.message);
-      toast.error('Error al consultar RENIEC', { description: error.message });
-      setSubmitMessage({ type: 'error', text: `Error al consultar RENIEC: ${error.message}` });
-      form.reset({ ...form.getValues(), dni: dni, nombres: '', apellidoPaterno: '', apellidoMaterno: '', edad: null, direccionDNI: null, provinciaDNI: null, regionDNI: null, fechaNacimiento: null, celular: null, situacionEconomica: undefined });
-      setIsEditingExisting(false);
-      setDniFoundInSupabase(false);
+      console.error('Error al consultar Reniec:', error);
+      // Añadir log para la respuesta de error de Axios si está disponible
+      if (axios.isAxiosError(error) && error.response) {
+        console.error('Axios Error Response Data:', error.response.data);
+        console.error('Axios Error Response Status:', error.response.status);
+        console.error('Axios Error Response Headers:', error.response.headers);
+      }
+      toast.error('Error al consultar Reniec', { description: error.message || 'Hubo un problema al conectar con el servicio Reniec.' });
+      setValue('nombres', '');
+      setValue('apellidoPaterno', '');
+      setValue('apellidoMaterno', '');
+      setValue('fechaNacimiento', '');
+      setValue('edad', null);
+      setValue('celular', '');
+      setValue('direccionDNI', '');
+      setValue('regionDNI', '');
+      setValue('provinciaDNI', '');
+      setValue('distritoDNI', '');
+      setValue('localidad', ''); // Clear new 'localidad' field
     } finally {
-      setIsLoadingDni(false);
+      setIsReniecSearching(false);
+      console.log('setIsReniecSearching(false)');
     }
-  };
+  }, [watchedDni, setValue]);
 
-  const handleDniBlur = () => {
-    const dniValue = watch('dni');
-    if (dniValue && /^\d{8}$/.test(dniValue)) {
-      searchDniInSupabase(dniValue);
+
+  useEffect(() => {
+    const fetchSocio = async () => {
+      if (socioId) {
+        const { data, error } = await supabase
+          .from('socio_titulares')
+          .select('*')
+          .eq('id', socioId)
+          .single();
+
+        if (error) {
+          console.error('Error fetching socio:', error.message);
+          toast.error('Error al cargar socio', { description: error.message });
+        } else if (data) {
+          reset({
+            ...data,
+            fechaNacimiento: data.fechaNacimiento ? format(parseISO(data.fechaNacimiento), 'yyyy-MM-dd') : '',
+            situacionEconomica: data.situacionEconomica || undefined,
+            mz: data.mz || '',
+            lote: data.lote || '',
+            regionVivienda: data.regionVivienda || '',
+            provinciaVivienda: data.provinciaVivienda || '',
+            distritoVivienda: data.distritoVivienda || '',
+            localidad: data.localidad || '', // Mapped to new 'localidad' field
+            direccionDNI: data.direccionDNI || '',
+            regionDNI: data.regionDNI || '',
+            provinciaDNI: data.provinciaDNI || '',
+            distritoDNI: data.distritoDNI || '',
+            edad: data.edad || null,
+            genero: data.genero || undefined, // Added
+          });
+        }
+      }
+    };
+    fetchSocio();
+  }, [socioId, reset]);
+
+  const searchSocioByDni = useCallback(async (dni: string) => {
+    if (!dni || dni.length !== 8) {
+      setValue('nombres', '');
+      setValue('apellidoPaterno', '');
+      setValue('apellidoMaterno', '');
+      return;
+    }
+    setIsDniSearching(true);
+    const { data, error } = await supabase
+      .from('socio_titulares')
+      .select('nombres, apellidoPaterno, apellidoMaterno, fechaNacimiento, edad, celular, direccionDNI, regionDNI, provinciaDNI, distritoDNI, localidad, genero') // Updated select fields
+      .eq('dni', dni)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error searching socio by DNI:', error.message);
+      toast.error('Error al buscar DNI en la base de datos', { description: error.message });
+      setValue('nombres', '');
+      setValue('apellidoPaterno', '');
+      setValue('apellidoMaterno', '');
+      setValue('fechaNacimiento', '');
+      setValue('edad', null);
+      setValue('celular', '');
+      setValue('direccionDNI', '');
+      setValue('regionDNI', '');
+      setValue('provinciaDNI', '');
+      setValue('distritoDNI', '');
+      setValue('localidad', ''); // Clear new 'localidad' field
+      setValue('genero', undefined); // Clear new 'genero' field
+    } else if (data) {
+      setValue('nombres', data.nombres);
+      setValue('apellidoPaterno', data.apellidoPaterno);
+      setValue('apellidoMaterno', data.apellidoMaterno);
+      setValue('fechaNacimiento', data.fechaNacimiento ? format(parseISO(data.fechaNacimiento), 'yyyy-MM-dd') : '');
+      setValue('edad', data.edad);
+      setValue('celular', data.celular);
+      setValue('direccionDNI', data.direccionDNI);
+      setValue('regionDNI', data.regionDNI);
+      setValue('provinciaDNI', data.provinciaDNI);
+      setValue('distritoDNI', data.distritoDNI);
+      setValue('localidad', data.localidad); // Set new 'localidad' field
+      setValue('genero', data.genero || undefined); // Set new 'genero' field
+      toast.success('Socio encontrado en la base de datos', { description: `Nombre: ${data.nombres} ${data.apellidoPaterno}` });
     } else {
-      setDniFoundInSupabase(null);
-      setIsEditingExisting(!!socioId); // Resetear basado en la prop
-      setSubmitMessage(null);
+      setValue('nombres', '');
+      setValue('apellidoPaterno', '');
+      setValue('apellidoMaterno', '');
+      setValue('fechaNacimiento', '');
+      setValue('edad', null);
+      setValue('celular', '');
+      setValue('direccionDNI', '');
+      setValue('regionDNI', '');
+      setValue('provinciaDNI', '');
+      setValue('distritoDNI', '');
+      setValue('localidad', ''); // Clear new 'localidad' field
+      setValue('genero', undefined); // Clear new 'genero' field
+      toast.warning('DNI no encontrado en la base de datos', { description: 'No se encontró un socio con este DNI. Puedes consultar Reniec.' });
     }
-  };
+    setIsDniSearching(false);
+  }, [setValue]);
 
-  // Modified onSubmit to open confirmation dialog
-  const onSubmit = async (values: SocioTitularFormValues, event?: React.BaseSyntheticEvent) => {
-    event?.preventDefault(); // Explicitly prevent default form submission
-    setDataToConfirm(values);
-    setIsConfirmDialogOpen(true);
-  };
+  useEffect(() => {
+    if (socioId && watchedDni) {
+      searchSocioByDni(watchedDni);
+    }
+  }, [socioId, watchedDni, searchSocioByDni]);
 
-  // NEW: Function to close *only* the confirmation dialog
   const handleCloseConfirmationOnly = () => {
     setIsConfirmDialogOpen(false);
     setDataToConfirm(null);
     setIsConfirmingSubmission(false);
   };
 
-  // Function to handle actual submission after confirmation
+  const onSubmit = async (values: SocioTitularFormValues, event?: React.BaseSyntheticEvent) => {
+    event?.preventDefault();
+    setDataToConfirm(values);
+    setIsConfirmDialogOpen(true);
+  };
+
   const handleConfirmSubmit = async () => {
     if (!dataToConfirm) return;
 
     setIsConfirmingSubmission(true);
-    setSubmitMessage(null); // Clear previous messages
-
     try {
-      const dataToSubmit: Partial<SocioTitularType> = {
-        nombres: dataToConfirm.nombres,
-        apellidoPaterno: dataToConfirm.apellidoPaterno,
-        apellidoMaterno: dataToConfirm.apellidoMaterno,
-        edad: dataToConfirm.edad,
-        dni: dataToConfirm.dni,
-        direccionDNI: dataToConfirm.direccionDNI,
-        distritoDNI: dataToConfirm.distritoDNI,
-        provinciaDNI: dataToConfirm.provinciaDNI,
-        regionDNI: dataToConfirm.regionDNI,
-        fechaNacimiento: formatDateForDB(dataToConfirm.fechaNacimiento), // Convertir a YYYY-MM-DD
-        celular: dataToConfirm.celular,
-        localidad: dataToConfirm.localidad,
-        situacionEconomica: dataToConfirm.situacionEconomica,
-        direccionVivienda: dataToConfirm.direccionVivienda,
-        mz: dataToConfirm.mz,
-        lote: dataToConfirm.lote,
-        ubicacionReferencia: dataToConfirm.ubicacionReferencia,
-        distritoVivienda: dataToConfirm.distritoVivienda,
-        provinciaVivienda: dataToConfirm.provinciaVivienda,
-        regionVivienda: dataToConfirm.regionVivienda,
+      const dataToSave: Partial<SocioTitular> = {
+        ...dataToConfirm,
       };
 
-      // Asegurar que las cadenas vacías se conviertan a nulo para Supabase
-      for (const key in dataToSubmit) {
-        const value = dataToSubmit[key as keyof typeof dataToSubmit];
-        if (typeof value === 'string' && value.trim() === '') {
-          (dataToSubmit as any)[key] = null;
-        }
-      }
-
-      console.log('Payload being sent to Supabase:', dataToSubmit);
-
-      let response;
-      if (isEditingExisting && socioId) {
-        response = await supabase
+      if (socioId) {
+        const { error } = await supabase
           .from('socio_titulares')
-          .update(dataToSubmit)
-          .eq('id', socioId)
-          .select();
+          .update(dataToSave)
+          .eq('id', socioId);
+
+        if (error) throw error;
+        toast.success('Socio actualizado', { description: 'El socio titular ha sido actualizado exitosamente.' });
+        onSuccess();
+        onClose();
       } else {
-        // Verificar si el DNI ya existe antes de insertar
-        const { data: existingSocio, error: existingError } = await supabase
+        const { error } = await supabase
           .from('socio_titulares')
-          .select('id')
-          .eq('dni', dataToConfirm.dni)
-          .single();
+          .insert(dataToSave);
 
-        if (existingError && existingError.code !== 'PGRST116') {
-          throw existingError;
-        }
+        if (error) throw error;
+        toast.success('Socio registrado', { description: 'El nuevo socio titular ha sido registrado exitosamente.' });
+        onSuccess();
+        
+        reset({
+          nombres: '',
+          apellidoPaterno: '',
+          apellidoMaterno: '',
+          dni: '',
+          fechaNacimiento: '',
+          edad: null,
+          celular: '',
+          situacionEconomica: undefined,
+          direccionDNI: '',
+          regionDNI: '',
+          provinciaDNI: '',
+          distritoDNI: '',
+          localidad: '',
+          genero: undefined,
 
-        if (existingSocio) {
-          toast.error('DNI ya registrado', { description: 'Ya existe un socio registrado con este DNI.' });
-          setSubmitMessage({ type: 'error', text: 'Ya existe un socio registrado con este DNI.' });
-          setIsConfirmingSubmission(false);
-          return;
-        }
-
-        response = await supabase
-          .from('socio_titulares')
-          .insert([dataToSubmit])
-          .select();
-      }
-
-      const { data, error } = response;
-
-      if (error) {
-        throw error;
-      }
-
-      console.log('Formulario enviado y datos guardados en Supabase:', data);
-      toast.success('Socio Titular guardado', { description: `Formulario ${isEditingExisting ? 'actualizado' : 'enviado'} con éxito y datos guardados.` });
-      setSubmitMessage({ type: 'success', text: `Formulario ${isEditingExisting ? 'actualizado' : 'enviado'} con éxito y datos guardados.` });
-      
-      onSuccess(); // Llamar al callback onSuccess
-
-      if (isEditingExisting) {
-        onClose(); // Close the main dialog for edits
-      } else {
-        // For new registrations: keep main dialog open, just reset form and close confirmation
-        form.reset({
-          nombres: '', apellidoPaterno: '', apellidoMaterno: '', dni: null, edad: null,
-          direccionDNI: null, distritoDNI: null, provinciaDNI: null, regionDNI: null,
-          fechaNacimiento: null, celular: null, localidad: null, direccionVivienda: null,
-          mz: null, lote: null, ubicacionReferencia: null, distritoVivienda: null,
-          provinciaVivienda: null, regionVivienda: null, situacionEconomica: undefined,
+          regionVivienda: '',
+          provinciaVivienda: '',
+          distritoVivienda: '',
+          direccionVivienda: '',
+          mz: '',
+          lote: '',
         });
-        setDniFoundInSupabase(null); // Reset DNI status for new entry
-        handleCloseConfirmationOnly(); // Close only the confirmation dialog
+        handleCloseConfirmationOnly();
+        setActiveTab('personal');
       }
-
-    } catch (error: any) {
-      console.error('Error al enviar el formulario a Supabase:', error.message);
-      toast.error('Error al guardar datos', { description: error.message });
-      setSubmitMessage({ type: 'error', text: `Error al guardar los datos: ${error.message}` });
+    } catch (submitError: any) {
+      console.error('Error al guardar el socio:', submitError.message);
+      toast.error('Error al guardar socio', { description: submitError.message });
     } finally {
       setIsConfirmingSubmission(false);
     }
   };
 
   return (
-    <div className="w-full">
-      <form onSubmit={handleSubmit(onSubmit)} className="bg-surface p-8 md:p-12 rounded-2xl shadow-xl border border-border">
-        <div className="mb-8 border-b border-border">
-          <div className="flex space-x-4">
-            <button
+    <FormProvider {...form}>
+      <Form {...form}>
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+          <div className="flex border-b border-border">
+            <Button
               type="button"
+              variant="ghost"
               onClick={() => setActiveTab('personal')}
-              className={`px-6 py-3 text-lg font-semibold rounded-t-lg transition-all duration-200 ${
-                activeTab === 'personal'
-                  ? 'bg-primary text-white shadow-md'
-                  : 'bg-surface text-textSecondary hover:bg-surface/70'
-              }`}
+              className={cn(
+                "py-2 px-4 text-lg font-semibold transition-colors duration-300",
+                activeTab === 'personal' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'
+              )}
             >
               Datos Personales
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              onClick={() => setActiveTab('housing')}
-              className={`px-6 py-3 text-lg font-semibold rounded-t-lg transition-all duration-200 ${
-                activeTab === 'housing'
-                  ? 'bg-primary text-white shadow-md'
-                  : 'bg-surface text-textSecondary hover:bg-surface/70'
-              }`}
+              variant="ghost"
+              onClick={() => setActiveTab('address')}
+              className={cn(
+                "py-2 px-4 text-lg font-semibold transition-colors duration-300",
+                activeTab === 'address' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'
+              )}
             >
               Datos de Vivienda
-            </button>
+            </Button>
           </div>
-        </div>
 
-        {activeTab === 'personal' && (
-          <section className="mb-10 pb-8 animate-fade-in">
-            <h2 className="text-3xl font-bold text-primary mb-6 flex items-center">
-              <User className="mr-3 text-accent" size={32} /> Datos Personales
-            </h2>
-
-            {/* Opciones de búsqueda de DNI */}
-            <div className="mb-4">
-              <Label className="block text-textSecondary text-sm font-medium mb-2">
-                Opciones de búsqueda de DNI:
-              </Label>
-              <div className="flex space-x-4">
-                <Button
-                  type="button"
-                  onClick={() => searchDniInSupabase(currentDni)}
-                  className={cn(
-                    "px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200",
-                    dniFoundInSupabase === true
-                      ? 'bg-primary text-white shadow-md'
-                      : 'bg-surface text-textSecondary hover:bg-surface/70'
+          <div className="p-4 space-y-4">
+            {activeTab === 'personal' && (
+              <>
+                {renderInputField('nombres', 'Nombres', 'Ej: Juan Carlos', 'text', isReniecSearching)}
+                {renderInputField('apellidoPaterno', 'Apellido Paterno', 'Ej: García', 'text', isReniecSearching)}
+                {renderInputField('apellidoMaterno', 'Apellido Materno', 'Ej: Pérez', 'text', isReniecSearching)}
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="dni" className="text-right text-textSecondary">
+                    DNI
+                  </Label>
+                  <div className="col-span-3 relative flex items-center gap-2">
+                    <Input
+                      id="dni"
+                      type="text"
+                      {...register('dni')}
+                      className="flex-grow rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+                      placeholder="Ej: 12345678"
+                      readOnly={isDniSearching || isReniecSearching}
+                      onBlur={() => searchSocioByDni(watchedDni)}
+                    />
+                    {isDniSearching && (
+                      <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />
+                    )}
+                    {watchedDni && watchedDni.length === 8 && (
+                      <Button
+                        type="button"
+                        onClick={handleReniecSearch}
+                        disabled={isReniecSearching || isDniSearching}
+                        className="rounded-lg bg-accent text-accent-foreground hover:bg-accent/90 transition-all duration-300 px-3 py-2 text-sm"
+                      >
+                        {isReniecSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Consulta Reniec'}
+                      </Button>
+                    )}
+                  </div>
+                  {errors.dni && <p className="col-span-4 text-right text-error text-sm">{errors.dni?.message}</p>}
+                </div>
+                <FormField
+                  control={form.control}
+                  name="fechaNacimiento"
+                  render={({ field }) => (
+                    <FormItem className="grid grid-cols-4 items-center gap-4">
+                      <FormLabel className="text-right text-textSecondary">Fecha Nacimiento</FormLabel>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant={"outline"}
+                              className={cn(
+                                "col-span-3 w-full justify-start text-left font-normal rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300",
+                                !field.value && "text-muted-foreground"
+                              )}
+                              disabled={isReniecSearching}
+                            >
+                              <CalendarIcon className="mr-2 h-4 w-4" />
+                              {field.value ? format(parseISO(field.value), "PPP", { locale: es }) : <span>Selecciona una fecha</span>}
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0 bg-card border-border rounded-xl shadow-lg" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={field.value ? parseISO(field.value) : undefined}
+                            onSelect={(date) => {
+                              field.onChange(date ? format(date, 'yyyy-MM-dd') : '');
+                            }}
+                            initialFocus
+                            locale={es}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage className="col-span-4 text-right" />
+                    </FormItem>
                   )}
-                  disabled={isLoadingDni || !currentDni || !/^\d{8}$/.test(currentDni)}
-                >
-                  Buscar en Base de Datos
-                </Button>
+                />
+                {renderInputField('edad', 'Edad', 'Ej: 35', 'number', true)}
+                {renderInputField('localidad', 'Localidad', 'Ej: San Juan', 'text', isReniecSearching)}
+                {renderTextareaField('direccionDNI', 'Dirección DNI', 'Ej: Av. Los Girasoles 123', isReniecSearching, isReniecSearching)}
+                {renderInputField('regionDNI', 'Región DNI', 'Ej: Lima', 'text', isReniecSearching)}
+                {renderInputField('provinciaDNI', 'Provincia DNI', 'Ej: Lima', 'text', isReniecSearching)}
+                {renderInputField('distritoDNI', 'Distrito DNI', 'Ej: Miraflores', 'text', isReniecSearching)}
+                {renderInputField('celular', 'Celular (Opcional)', 'Ej: 987654321', 'tel', isReniecSearching)}
+                {renderRadioGroupField('genero', 'Género', genderOptions)}
+                {renderRadioGroupField('situacionEconomica', 'Situación Económica', economicSituationOptions)}
 
-                {dniFoundInSupabase === false && (
+                <div className="flex justify-end mt-6">
                   <Button
                     type="button"
-                    onClick={() => searchDniInExternalApi(currentDni)}
-                    className={cn(
-                      "px-4 py-2 rounded-lg text-sm font-medium transition-colors duration-200",
-                      isLoadingDni ? 'bg-gray-600' : 'bg-accent text-white shadow-md hover:bg-accent/90'
-                    )}
-                    disabled={isLoadingDni || !currentDni || !/^\d{8}$/.test(currentDni)}
+                    onClick={() => setActiveTab('address')}
+                    className="rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/90 transition-all duration-300"
                   >
-                    Consultar RENIEC
+                    Siguiente: Datos de Vivienda
                   </Button>
-                )}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {renderInputField('DNI', 'dni', 'text', 'Ej: 12345678', '\\d{8}', handleDniBlur)}
-              {renderInputField('Nombres', 'nombres', 'text', 'Ej: Juan Carlos')}
-              {renderInputField('Apellido Paterno', 'apellidoPaterno', 'text', 'Ej: García')}
-              {renderInputField('Apellido Materno', 'apellidoMaterno', 'text', 'Ej: Pérez')}
-              {renderInputField('Fecha de Nacimiento', 'fechaNacimiento', 'text', 'DD/MM/YYYY', '\\d{2}/\\d{2}/\\d{4}')}
-              {renderInputField('Edad', 'edad', 'number', 'Ej: 35')}
-              {renderInputField('Localidad', 'localidad', 'text', 'Ej: San Juan')}
-              {renderInputField('Dirección de DNI', 'direccionDNI', 'text', 'Ej: Av. Los Girasoles 123')}
-              {renderInputField('Región (DNI)', 'regionDNI', 'text', 'Ej: Lima')}
-              {renderInputField('Provincia (DNI)', 'provinciaDNI', 'text', 'Ej: Lima')}
-              {renderInputField('Distrito (DNI)', 'distritoDNI', 'text', 'Ej: Miraflores')}
-              {renderInputField('Celular', 'celular', 'text', 'Ej: 987654321', '\\d{9}', undefined, false)}
-            </div>
-          </section>
-        )}
-
-        {activeTab === 'housing' && (
-          <section className="mb-10 pb-8 animate-fade-in">
-            <h2 className="text-3xl font-bold text-primary mb-6 flex items-center">
-              <Home className="mr-3 text-accent" size={32} /> Datos de Instalación de Vivienda
-            </h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {renderInputField('Dirección (Vivienda)', 'direccionVivienda', 'text', 'Ej: Calle Las Flores 456', undefined, undefined, false)}
-              {renderInputField('MZ (Manzana)', 'mz', 'text', 'Ej: A', undefined, undefined, false)}
-              {renderInputField('Lote', 'lote', 'text', 'Ej: 15', undefined, undefined, false)}
-              {renderInputField('Ubicación (Referencia)', 'ubicacionReferencia', 'text', 'Ej: Frente al parque', undefined, undefined, false)}
-              {renderInputField('Región (Vivienda)', 'regionVivienda', 'text', 'Ej: Lima', undefined, undefined, false)}
-              {renderInputField('Provincia (Vivienda)', 'provinciaVivienda', 'text', 'Ej: Lima', undefined, undefined, false)}
-              {renderInputField('Distrito (Vivienda)', 'distritoVivienda', 'text', 'Ej: San Juan de Lurigancho', undefined, undefined, false)}
-            </div>
-          </section>
-        )}
-
-        <section className="mb-10 pb-8 border-b border-border animate-fade-in delay-100">
-          <h2 className="text-3xl font-bold text-primary mb-6 flex items-center">
-            Situación Económica
-          </h2>
-          <div className="mb-6">
-            <Label className="block text-textSecondary text-sm font-medium mb-2">
-              Situación Económica <span className="text-error">*</span>
-            </Label>
-            <div className="flex flex-wrap gap-4">
-              {ECONOMIC_SITUATIONS.map(option => (
-                <label key={option.value} className="inline-flex items-center cursor-pointer">
-                  <input
-                    type="radio"
-                    {...register('situacionEconomica')}
-                    value={option.value}
-                    checked={watch('situacionEconomica') === option.value}
-                    className="form-radio h-5 w-5 text-primary border-border bg-surface focus:ring-primary transition-colors duration-200"
-                  />
-                  <span className="ml-2 text-text">{option.label}</span>
-                </label>
-              ))}
-            </div>
-            {errors.situacionEconomica && <p className="text-error text-sm mt-1">{errors.situacionEconomica.message}</p>}
-          </div>
-        </section>
-
-        {submitMessage && (
-          <div className={`mb-4 p-4 rounded-lg text-center ${
-            submitMessage.type === 'success' ? 'bg-success/20 text-success' :
-            submitMessage.type === 'warning' ? 'bg-warning/20 text-warning' :
-            'bg-error/20 text-error'
-          }`}>
-            {submitMessage.text}
-          </div>
-        )}
-        <div className="flex justify-end animate-fade-in delay-300">
-          {activeTab === 'personal' && (
-            <Button
-              type="button" // Important: prevent default form submission
-              onClick={() => setActiveTab('housing')}
-              className="px-8 py-3 bg-secondary text-white font-bold rounded-xl shadow-lg hover:bg-secondary/90 focus:outline-none focus:ring-4 focus:ring-secondary/50 transition-all duration-300 transform hover:scale-105 mr-4"
-            >
-              Siguiente: Datos de Vivienda
-            </Button>
-          )}
-          <Button
-            type="submit"
-            className="px-8 py-3 bg-primary text-white font-bold rounded-xl shadow-lg hover:bg-primary/90 focus:outline-none focus:ring-4 focus:ring-primary/50 transition-all duration-300 transform hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-            disabled={isLoadingDni || isSubmitting}
-          >
-            {isSubmitting ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              isEditingExisting ? 'Actualizar Socio Titular' : 'Registrar Socio Titular'
+                </div>
+              </>
             )}
-          </Button>
-        </div>
-      </form>
 
-      {/* Confirmation Dialog */}
+            {activeTab === 'address' && (
+              <>
+                {renderTextareaField('direccionVivienda', 'Dirección (Vivienda) (Opcional)', 'Ej: Calle Las Flores 456')}
+                {renderInputField('mz', 'MZ (Manzana) (Opcional)', 'Ej: A')}
+                {renderInputField('lote', 'Lote (Opcional)', 'Ej: 15')}
+                {renderInputField('regionVivienda', 'Región (Vivienda) (Opcional)', 'Ej: Lima')}
+                {renderInputField('provinciaVivienda', 'Provincia (Vivienda) (Opcional)', 'Ej: Lima')}
+                {renderInputField('distritoVivienda', 'Distrito (Vivienda) (Opcional)', 'Ej: San Juan de Lurigancho')}
+              </>
+            )}
+          </div>
+
+          <DialogFooter className="p-6 pt-4 border-t border-border">
+            <Button type="button" variant="outline" onClick={onClose} className="rounded-lg border-border hover:bg-muted/50 transition-all duration-300">
+              Cancelar
+            </Button>
+            <Button type="submit" className="rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
+              {socioId ? 'Guardar Cambios' : 'Registrar Socio Titular'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </Form>
+
       <ConfirmationDialog
         isOpen={isConfirmDialogOpen}
         onClose={handleCloseConfirmationOnly}
         onConfirm={handleConfirmSubmit}
-        title={isEditingExisting ? 'Confirmar Edición de Socio' : 'Confirmar Nuevo Socio'}
-        description="Por favor, revisa los detalles del socio antes de confirmar el registro."
+        title={socioId ? 'Confirmar Edición de Socio' : 'Confirmar Registro de Socio'}
+        description="Por favor, revisa los detalles del socio antes de confirmar."
         data={dataToConfirm || {}}
-        confirmButtonText={isEditingExisting ? 'Confirmar Actualización' : 'Confirmar Registro'}
+        confirmButtonText={socioId ? 'Confirmar Actualización' : 'Confirmar Registro'}
         isConfirming={isConfirmingSubmission}
       />
-    </div>
+    </FormProvider>
   );
-};
+}
 
 export default SocioTitularRegistrationForm;

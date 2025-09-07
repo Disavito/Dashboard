@@ -31,15 +31,35 @@ const incomeFormSchema = z.object({
   dni: z.string().min(8, { message: 'El DNI debe tener 8 dígitos.' }).max(8, { message: 'El DNI debe tener 8 dígitos.' }).regex(/^\d{8}$/, { message: 'El DNI debe ser 8 dígitos numéricos.' }),
   full_name: z.string().min(1, { message: 'El nombre completo es requerido.' }).max(255, { message: 'El nombre completo es demasiado largo.' }),
   amount: z.preprocess(
-    (val) => Number(val),
-    z.number().positive({ message: 'El monto debe ser positivo.' })
+    (val) => {
+      if (val === '') return undefined; // Treat empty string as undefined
+      return Number(val);
+    },
+    z.number({
+      required_error: 'El monto es requerido.', // Message for undefined/null
+      invalid_type_error: 'El monto debe ser un número.' // Message for non-numeric
+    })
+    .positive({ message: 'El monto debe ser positivo.' })
   ),
   account: z.string().min(1, { message: 'La cuenta es requerida.' }),
   date: z.string().min(1, { message: 'La fecha es requerida.' }),
   transaction_type: z.enum(['Ingreso', 'Anulacion', 'Devolucion'], { message: 'Tipo de transacción inválido.' }).optional(),
 });
 
+// Type for the data after Zod transformation (what onSubmit receives from resolver)
 type IncomeFormValues = z.infer<typeof incomeFormSchema>;
+
+// Type for the form's internal state (before Zod transformation, for useForm defaultValues)
+type IncomeFormInputValues = {
+  receipt_number: string;
+  dni: string;
+  full_name: string;
+  amount: string; // Input field will hold a string
+  account: string;
+  date: string;
+  transaction_type: 'Ingreso' | 'Anulacion' | 'Devolucion' | undefined;
+};
+
 
 // --- Column Definitions for Ingreso ---
 const incomeColumns: ColumnDef<IngresoType>[] = [
@@ -130,13 +150,13 @@ function Income() {
   const [isConfirmingSubmission, setIsConfirmingSubmission] = useState(false);
 
 
-  const form = useForm<IncomeFormValues>({
+  const form = useForm<IncomeFormInputValues>({ // Use IncomeFormInputValues here
     resolver: zodResolver(incomeFormSchema),
     defaultValues: {
       receipt_number: '',
       dni: '',
       full_name: '',
-      amount: 0,
+      amount: '', // Changed default to empty string, now valid with IncomeFormInputValues
       account: '',
       date: '',
       transaction_type: undefined,
@@ -197,17 +217,17 @@ function Income() {
         receipt_number: income.receipt_number || '',
         dni: income.dni || '',
         full_name: income.full_name || '',
-        amount: income.amount,
+        amount: income.amount.toString(), // Convert number to string for input value
         account: income.account || '',
         date: income.date,
-        transaction_type: income.transaction_type as IncomeFormValues['transaction_type'] || undefined,
+        transaction_type: income.transaction_type as IncomeFormInputValues['transaction_type'] || undefined,
       });
     } else {
       form.reset({
         receipt_number: '',
         dni: '',
         full_name: '',
-        amount: 0,
+        amount: '', // Changed default to empty string
         account: '',
         date: '',
         transaction_type: undefined,
@@ -224,9 +244,15 @@ function Income() {
   };
 
   // Modified onSubmit to open confirmation dialog
-  const onSubmit = async (values: IncomeFormValues, event?: React.BaseSyntheticEvent) => {
+  // Change 'values' type to IncomeFormInputValues
+  const onSubmit = async (inputValues: IncomeFormInputValues, event?: React.BaseSyntheticEvent) => {
     event?.preventDefault();
-    setDataToConfirm(values);
+
+    // Manually parse the input values to get the validated and transformed data
+    // This step ensures 'amount' is converted to a number as per incomeFormSchema
+    const parsedValues: IncomeFormValues = incomeFormSchema.parse(inputValues);
+
+    setDataToConfirm(parsedValues); // dataToConfirm is IncomeFormValues | null
     setIsConfirmDialogOpen(true);
   };
 
@@ -249,7 +275,7 @@ function Income() {
           receipt_number: '',
           dni: '',
           full_name: '',
-          amount: 0,
+          amount: '', // Reset to empty string
           account: '',
           date: '',
           transaction_type: undefined,
@@ -351,7 +377,7 @@ function Income() {
           </DialogHeader>
           {/* Wrap the form with the Form component */}
           <Form {...form}>
-            <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 py-4">
+            <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 py-4"> {/* Removed <IncomeFormValues> */}
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="receipt_number" className="text-right text-textSecondary">
                   Nº Recibo
@@ -435,7 +461,7 @@ function Income() {
                 <Label htmlFor="transaction_type" className="text-right text-textSecondary">
                   Tipo Transacción
                 </Label>
-                <Select onValueChange={(value) => setValue('transaction_type', value as IncomeFormValues['transaction_type'])} value={watch('transaction_type')}>
+                <Select onValueChange={(value) => setValue('transaction_type', value as IncomeFormInputValues['transaction_type'])} value={watch('transaction_type')}>
                   <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
                     <SelectValue placeholder="Selecciona un tipo de transacción" />
                   </SelectTrigger>

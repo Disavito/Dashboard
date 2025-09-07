@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ColumnDef } from '@tanstack/react-table';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PlusCircle, Edit, ArrowUpDown, CalendarIcon } from 'lucide-react'; // Added CalendarIcon
+import { PlusCircle, Edit, ArrowUpDown, CalendarIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui-custom/DataTable';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -12,35 +12,56 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useSupabaseData } from '@/hooks/useSupabaseData';
-import { Gasto as GastoType, Colaborador, Cuenta } from '@/lib/types'; // Import Cuenta
+import { Gasto as GastoType, Colaborador, Cuenta } from '@/lib/types';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { toast } from 'sonner';
 import ConfirmationDialog from '@/components/ui-custom/ConfirmationDialog';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'; // New import
-import { Calendar } from '@/components/ui/calendar'; // New import
-import { cn } from '@/lib/utils'; // New import
-import { FormField, FormItem, FormLabel, FormControl, FormMessage, Form } from '@/components/ui/form'; // New import
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
+import { FormField, FormItem, FormLabel, FormControl, FormMessage, Form } from '@/components/ui/form';
 
 
 // --- Form Schema for Gasto ---
 const expenseFormSchema = z.object({
   amount: z.preprocess(
-    (val) => Number(val),
-    z.number().positive({ message: 'El monto debe ser positivo.' })
+    (val) => {
+      if (val === '') return undefined; // Treat empty string as undefined
+      return Number(val);
+    },
+    z.number({
+      required_error: 'El monto es requerido.',
+      invalid_type_error: 'El monto debe ser un número.'
+    })
+    .positive({ message: 'El monto debe ser positivo.' })
   ),
   account: z.string().min(1, { message: 'La cuenta es requerida.' }),
   date: z.string().min(1, { message: 'La fecha es requerida.' }),
   category: z.string().min(1, { message: 'La categoría es requerida.' }),
-  sub_category: z.string().optional().nullable(),
+  sub_category: z.string().optional().nullable(), // Subcategory is optional and nullable
   description: z.string().min(1, { message: 'La descripción es requerida.' }).max(255, { message: 'La descripción es demasiado larga.' }),
   numero_gasto: z.string().optional().nullable(),
-  colaborador_id: z.string().uuid().optional().nullable(), // UUID for foreign key
+  colaborador_id: z.string().uuid().optional().nullable(),
 });
 
+// Type for the data after Zod transformation (what onSubmit receives from resolver)
 type ExpenseFormValues = z.infer<typeof expenseFormSchema>;
+
+// Type for the form's internal state (before Zod transformation, for useForm defaultValues)
+type ExpenseFormInputValues = {
+  amount: string; // Input field will hold a string
+  account: string;
+  date: string;
+  category: string;
+  sub_category: string | null;
+  description: string;
+  numero_gasto: string | null;
+  colaborador_id: string | null;
+};
+
 
 // --- Column Definitions for Gasto ---
 const expenseColumns: ColumnDef<GastoType>[] = [
@@ -119,16 +140,61 @@ const expenseColumns: ColumnDef<GastoType>[] = [
   },
 ];
 
-const expenseCategories = ['Alquiler', 'Comida', 'Transporte', 'Servicios', 'Entretenimiento', 'Salud', 'Educación', 'Software', 'Oficina', 'Otros'];
-// const accounts = ['Caja Principal', 'Banco Ahorros', 'Tarjeta Crédito']; // Example accounts - REMOVED
+// --- New Expense Category and Subcategory Definitions ---
+const MAIN_EXPENSE_CATEGORIES = [
+  { value: 'Gasto Fijo', label: 'Gasto Fijo' },
+  { value: 'Viáticos', label: 'Viáticos' },
+  { value: 'Otros', label: 'Otros' },
+];
+
+const GASTOS_FIJOS_SUB_CATEGORIES = [
+  { value: 'internet', label: 'Internet' },
+  { value: 'servidor', label: 'Servidor' },
+  { value: 'alquiler', label: 'Alquiler' },
+  { value: 'agua_mantenimiento', label: 'Agua/Mantenimiento' },
+  { value: 'luz', label: 'Luz' },
+  { value: 'sueldo', label: 'Sueldo' },
+  { value: 'gasolina', label: 'Gasolina' },
+  { value: 'impuestos', label: 'Impuestos' },
+  { value: 'seguro', label: 'Seguro' },
+  { value: 'afp', label: 'AFP' },
+  { value: 'contador', label: 'Contador' },
+];
+
+const VIATICOS_SUB_CATEGORIES = [
+  { value: 'tecnicos', label: 'Técnicos' },
+  { value: 'proyecto', label: 'Proyecto' },
+  { value: 'representantes', label: 'Representantes' },
+  { value: 'ocasional', label: 'Ocasional' },
+];
+
+// Helper function to generate the next sequential numero_gasto
+const generateNextNumeroGasto = (expenses: GastoType[]): string => {
+  let maxNumber = 0;
+
+  // Filter for valid 'GAXXX' format and find the maximum number
+  expenses.forEach(expense => {
+    if (expense.numero_gasto && expense.numero_gasto.startsWith('GA')) {
+      const numPart = parseInt(expense.numero_gasto.substring(2), 10);
+      if (!isNaN(numPart) && numPart > maxNumber) {
+        maxNumber = numPart;
+      }
+    }
+  });
+
+  const nextNumber = maxNumber + 1;
+  // Pad with leading zeros to ensure a 3-digit number (e.g., 1 -> 001, 17 -> 017)
+  return `GA${String(nextNumber).padStart(3, '0')}`;
+};
+
 
 function Expenses() {
-  const { data: expenseData, loading, error, addRecord, updateRecord, deleteRecord } = useSupabaseData<GastoType>({ tableName: 'gastos' });
-  const { data: colaboradoresData } = useSupabaseData<Colaborador>({ tableName: 'colaboradores', enabled: true }); // Enabled to fetch data for dropdown
-  const { data: accountsData, loading: accountsLoading, error: accountsError } = useSupabaseData<Cuenta>({ tableName: 'cuentas' }); // Fetch accounts
+  const { data: expenseData, loading, error, addRecord, updateRecord, deleteRecord, refreshData } = useSupabaseData<GastoType>({ tableName: 'gastos' });
+  const { data: colaboradoresData } = useSupabaseData<Colaborador>({ tableName: 'colaboradores', enabled: true });
+  const { data: accountsData, loading: accountsLoading, error: accountsError } = useSupabaseData<Cuenta>({ tableName: 'cuentas' });
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<GastoType | null>(null);
-  const [globalFilter, setGlobalFilter] = useState(''); // Estado para el filtro global
+  const [globalFilter, setGlobalFilter] = useState('');
 
   // State for confirmation dialog
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
@@ -136,10 +202,10 @@ function Expenses() {
   const [isConfirmingSubmission, setIsConfirmingSubmission] = useState(false);
 
 
-  const form = useForm<ExpenseFormValues>({
+  const form = useForm<ExpenseFormInputValues>({ // Use ExpenseFormInputValues here
     resolver: zodResolver(expenseFormSchema),
     defaultValues: {
-      amount: 0,
+      amount: '', // This is now valid as amount is string in ExpenseFormInputValues
       account: '',
       date: format(new Date(), 'yyyy-MM-dd'),
       category: '',
@@ -150,10 +216,12 @@ function Expenses() {
     },
   });
 
+  const watchedCategory = form.watch('category'); // Watch the category field for dynamic subcategory rendering
+
   // Fetch accounts from Supabase
   const availableAccounts = accountsData.map(account => account.name);
 
-  // NEW: Function to close *only* the confirmation dialog
+  // Function to close *only* the confirmation dialog
   const handleCloseConfirmationOnly = () => {
     setIsConfirmDialogOpen(false);
     setDataToConfirm(null);
@@ -164,24 +232,26 @@ function Expenses() {
     setEditingExpense(expense || null);
     if (expense) {
       form.reset({
-        amount: expense.amount,
+        amount: expense.amount.toString(), // Convert number to string for form input
         account: expense.account || '',
         date: expense.date,
         category: expense.category || '',
-        sub_category: expense.sub_category || null,
+        sub_category: expense.sub_category || null, // Ensure it's null if not present
         description: expense.description || '',
         numero_gasto: expense.numero_gasto || null,
         colaborador_id: expense.colaborador_id || null,
       });
     } else {
+      // For new expenses, generate the next numero_gasto
+      const nextNumeroGasto = generateNextNumeroGasto(expenseData);
       form.reset({
-        amount: 0,
+        amount: '', // This is now valid
         account: '',
         date: format(new Date(), 'yyyy-MM-dd'),
-        category: '',
-        sub_category: null,
+        category: '', // Default to empty
+        sub_category: null, // Default to null
         description: '',
-        numero_gasto: null,
+        numero_gasto: nextNumeroGasto, // Set the auto-generated number
         colaborador_id: null,
       });
     }
@@ -189,46 +259,70 @@ function Expenses() {
   };
 
   const handleCloseDialog = () => {
-    setIsDialogOpen(false); // This closes the main dialog
+    setIsDialogOpen(false);
     setEditingExpense(null);
-    form.reset(); // Clears form fields
-    handleCloseConfirmationOnly(); // Also ensure confirmation dialog is closed and data cleared
+    form.reset();
+    handleCloseConfirmationOnly();
   };
 
   // Modified onSubmit to open confirmation dialog
-  const onSubmit = async (values: ExpenseFormValues, event?: React.BaseSyntheticEvent) => {
-    event?.preventDefault(); // Explicitly prevent default form submission
-    setDataToConfirm(values);
+  // Change 'values' type to ExpenseFormInputValues
+  const onSubmit = async (inputValues: ExpenseFormInputValues, event?: React.BaseSyntheticEvent) => {
+    event?.preventDefault();
+
+    // Manually parse the input values to get the validated and transformed data
+    // This step ensures 'amount' is converted to a number as per expenseFormSchema
+    const parsedValues: ExpenseFormValues = expenseFormSchema.parse(inputValues);
+
+    setDataToConfirm(parsedValues); // dataToConfirm is ExpenseFormValues | null
     setIsConfirmDialogOpen(true);
   };
 
   // Function to handle actual submission after confirmation
   const handleConfirmSubmit = async () => {
-    if (!dataToConfirm) return;
+    if (!dataToConfirm) return; // dataToConfirm is already ExpenseFormValues
 
     setIsConfirmingSubmission(true);
     try {
       if (editingExpense) {
         await updateRecord(editingExpense.id, dataToConfirm);
         toast.success('Gasto actualizado', { description: 'El gasto ha sido actualizado exitosamente.' });
-        handleCloseDialog(); // Close main dialog for edits
+        handleCloseDialog();
       } else {
-        await addRecord(dataToConfirm);
+        // Add the new record and get the returned object
+        const newRecord = await addRecord(dataToConfirm);
         toast.success('Gasto añadido', { description: 'El nuevo gasto ha sido registrado exitosamente.' });
         
-        // For new entries: reset form, close confirmation dialog, but keep main dialog open
+        let nextNumeroGastoForForm: string | null = null;
+        if (newRecord && newRecord.numero_gasto) {
+          // Calculate the next number based on the just-added record's number
+          const numPart = parseInt(newRecord.numero_gasto.substring(2), 10);
+          if (!isNaN(numPart)) {
+            nextNumeroGastoForForm = `GA${String(numPart + 1).padStart(3, '0')}`;
+          }
+        } else {
+          // Fallback: if newRecord or its numero_gasto is missing,
+          // regenerate based on the current (potentially stale) expenseData.
+          // This should ideally not happen if addRecord is successful.
+          nextNumeroGastoForForm = generateNextNumeroGasto(expenseData);
+        }
+
+        // Reset form with the newly calculated next numero_gasto
         form.reset({
-          amount: 0,
+          amount: '', // This is now valid
           account: '',
           date: format(new Date(), 'yyyy-MM-dd'),
           category: '',
           sub_category: null,
           description: '',
-          numero_gasto: null,
+          numero_gasto: nextNumeroGastoForForm, // Set the new auto-generated number
           colaborador_id: null,
         });
-        setEditingExpense(null); // Clear editing state
-        handleCloseConfirmationOnly(); // Close only the confirmation dialog
+        setEditingExpense(null);
+        handleCloseConfirmationOnly();
+
+        // Refresh data to ensure the table is updated with the new entry
+        await refreshData();
       }
     } catch (submitError: any) {
       console.error('Error al guardar el gasto:', submitError.message);
@@ -238,7 +332,7 @@ function Expenses() {
     }
   };
 
-  const handleDelete = async (id: string) => { // Gasto ID is string (UUID)
+  const handleDelete = async (id: string) => {
     if (window.confirm('¿Estás seguro de que quieres eliminar este gasto?')) {
       await deleteRecord(id);
       toast.success('Gasto eliminado', { description: 'El gasto ha sido eliminado exitosamente.' });
@@ -276,7 +370,7 @@ function Expenses() {
     return col;
   });
 
-  if (loading || accountsLoading) { // Added accountsLoading
+  if (loading || accountsLoading) {
     return <div className="text-center text-muted-foreground">Cargando gastos y cuentas...</div>;
   }
 
@@ -284,7 +378,7 @@ function Expenses() {
     return <div className="text-center text-destructive">Error al cargar gastos: {error}</div>;
   }
 
-  if (accountsError) { // Handle accountsError
+  if (accountsError) {
     return <div className="text-center text-destructive">Error al cargar cuentas: {accountsError}</div>;
   }
 
@@ -322,7 +416,7 @@ function Expenses() {
               {editingExpense ? 'Realiza cambios en el gasto existente aquí.' : 'Añade un nuevo registro de gasto a tu sistema.'}
             </DialogDescription>
           </DialogHeader>
-          <Form {...form}> {/* Wrap the form with the Form component */}
+          <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-4 py-4">
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="amount" className="text-right text-textSecondary">
@@ -334,7 +428,7 @@ function Expenses() {
                   step="0.01"
                   {...form.register('amount')}
                   className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-                  placeholder="0.00" // Added placeholder
+                  placeholder="0.00"
                 />
                 {form.formState.errors.amount && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.amount.message}</p>}
               </div>
@@ -347,7 +441,7 @@ function Expenses() {
                     <SelectValue placeholder="Selecciona una cuenta" />
                   </SelectTrigger>
                   <SelectContent className="bg-card border-border rounded-lg shadow-lg">
-                    {availableAccounts.length > 0 ? ( // Use availableAccounts
+                    {availableAccounts.length > 0 ? (
                       availableAccounts.map(account => (
                         <SelectItem key={account} value={account} className="hover:bg-muted/50 cursor-pointer">
                           {account}
@@ -364,31 +458,51 @@ function Expenses() {
                 <Label htmlFor="category" className="text-right text-textSecondary">
                   Categoría
                 </Label>
-                <Select onValueChange={(value) => form.setValue('category', value)} value={form.watch('category')}>
+                <Select onValueChange={(value) => {
+                  form.setValue('category', value);
+                  form.setValue('sub_category', null); // Reset sub_category when category changes
+                }} value={form.watch('category')}>
                   <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
                     <SelectValue placeholder="Selecciona una categoría" />
                   </SelectTrigger>
                   <SelectContent className="bg-card border-border rounded-lg shadow-lg">
-                    {expenseCategories.map(category => (
-                      <SelectItem key={category} value={category} className="hover:bg-muted/50 cursor-pointer">
-                        {category}
+                    {MAIN_EXPENSE_CATEGORIES.map(category => (
+                      <SelectItem key={category.value} value={category.value} className="hover:bg-muted/50 cursor-pointer">
+                        {category.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 {form.formState.errors.category && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.category.message}</p>}
               </div>
-              <div className="grid grid-cols-4 items-center gap-4">
-                <Label htmlFor="sub_category" className="text-right text-textSecondary">
-                  Subcategoría (Opcional)
-                </Label>
-                <Input
-                  id="sub_category"
-                  {...form.register('sub_category')}
-                  className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-                />
-                {form.formState.errors.sub_category && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.sub_category.message}</p>}
-              </div>
+
+              {/* Conditional Subcategory Select */}
+              {watchedCategory && (watchedCategory === 'Gasto Fijo' || watchedCategory === 'Viáticos') && (
+                <div className="grid grid-cols-4 items-center gap-4">
+                  <Label htmlFor="sub_category" className="text-right text-textSecondary">
+                    Subcategoría
+                  </Label>
+                  <Select onValueChange={(value) => form.setValue('sub_category', value)} value={form.watch('sub_category') || ''}>
+                    <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
+                      <SelectValue placeholder="Selecciona una subcategoría" />
+                    </SelectTrigger>
+                    <SelectContent className="bg-card border-border rounded-lg shadow-lg">
+                      {watchedCategory === 'Gasto Fijo' && GASTOS_FIJOS_SUB_CATEGORIES.map(subCat => (
+                        <SelectItem key={subCat.value} value={subCat.value} className="hover:bg-muted/50 cursor-pointer">
+                          {subCat.label}
+                        </SelectItem>
+                      ))}
+                      {watchedCategory === 'Viáticos' && VIATICOS_SUB_CATEGORIES.map(subCat => (
+                        <SelectItem key={subCat.value} value={subCat.value} className="hover:bg-muted/50 cursor-pointer">
+                          {subCat.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {form.formState.errors.sub_category && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.sub_category.message}</p>}
+                </div>
+              )}
+
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="description" className="text-right text-textSecondary">
                   Descripción
@@ -402,12 +516,13 @@ function Expenses() {
               </div>
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="numero_gasto" className="text-right text-textSecondary">
-                  Nº Gasto (Opcional)
+                  Nº Gasto
                 </Label>
                 <Input
                   id="numero_gasto"
                   {...form.register('numero_gasto')}
                   className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+                  readOnly // Make the field read-only
                 />
                 {form.formState.errors.numero_gasto && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.numero_gasto.message}</p>}
               </div>
@@ -422,7 +537,7 @@ function Expenses() {
                   <SelectContent className="bg-card border-border rounded-lg shadow-lg">
                     {colaboradoresData.map(colaborador => (
                       <SelectItem key={colaborador.id} value={colaborador.id} className="hover:bg-muted/50 cursor-pointer">
-                        {colaborador.name} {colaborador.apellidos} {/* Updated to use 'name' and 'apellidos' */}
+                        {colaborador.name} {colaborador.apellidos}
                       </SelectItem>
                     ))}
                   </SelectContent>

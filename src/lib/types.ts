@@ -47,7 +47,7 @@ export interface SocioTitular {
   apellidoPaterno: string;
   dni: string | null; // character varying UNIQUE
   created_at: string | null; // timestamp with time zone
-  ubicacionReferencia: string | null;
+  // ubicacionReferencia: string | null; // This maps to referenciaVivienda - REMOVED
   direccionDNI: string | null;
   edad: number | null; // integer
   distritoDNI: string | null;
@@ -58,12 +58,18 @@ export interface SocioTitular {
   direccionVivienda: string | null;
   mz: string | null;
   lote: string | null;
-  localidad: string | null;
   distritoVivienda: string | null;
   provinciaVivienda: string | null;
   regionVivienda: string | null;
   situacionEconomica: SituacionEconomica | null; // text CHECK ('Pobre' or 'Extremo Pobre')
-  genero: string | null;
+  genero: string | null; // Added as per SQL schema
+  localidad: string | null; // Added as per SQL schema
+}
+
+// New interface for economic situation options
+export interface EconomicSituationOption {
+  value: string;
+  label: string;
 }
 
 export type Transaction = Ingreso | Gasto;
