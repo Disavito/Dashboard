@@ -2,17 +2,98 @@
 
 import * as React from "react"
 import { ChevronLeft, ChevronRight } from "lucide-react"
-import { DayPicker } from "react-day-picker"
+import { DayPicker } from "react-day-picker" // Removed useDayPicker
+import { format, setMonth, setYear, getMonth, getYear } from "date-fns"
+import { es } from "date-fns/locale"
 
 import { cn } from "@/lib/utils"
 import { buttonVariants } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+
+// Define props for CustomCaption
+interface CustomCaptionProps {
+  displayMonth: Date;
+  onMonthChange: (month: Date) => void; // Explicitly pass this down
+  fromYear: number;
+  toYear: number;
+}
 
 function Calendar({
   className,
   classNames,
   showOutsideDays = true,
+  month: controlledMonth, // Accept controlled month prop
+  onMonthChange: controlledOnMonthChange, // Accept controlled onMonthChange prop
   ...props
 }: React.ComponentProps<typeof DayPicker>) {
+  const fromYear = new Date().getFullYear() - 100;
+  const toYear = new Date().getFullYear();
+
+  // Manage internal month state if not controlled from outside
+  const [internalMonth, setInternalMonth] = React.useState(controlledMonth || props.defaultMonth || new Date());
+
+  // Use the controlled month if provided, otherwise use internal state
+  const currentMonth = controlledMonth || internalMonth;
+  const handleMonthChange = controlledOnMonthChange || setInternalMonth;
+
+  const CustomCaption = ({ displayMonth, onMonthChange: captionOnMonthChange, fromYear, toYear }: CustomCaptionProps) => {
+    const handleMonthSelectChange = (value: string) => {
+      const newMonth = parseInt(value, 10);
+      captionOnMonthChange(setMonth(displayMonth, newMonth));
+    };
+
+    const handleYearSelectChange = (value: string) => {
+      const newYear = parseInt(value, 10);
+      captionOnMonthChange(setYear(displayMonth, newYear));
+    };
+
+    const monthValue = getMonth(displayMonth);
+    const yearValue = getYear(displayMonth);
+
+    const months = Array.from({ length: 12 }, (_, i) => ({
+      value: i,
+      label: format(setMonth(new Date(), i), 'MMM', { locale: es }),
+    }));
+
+    const years = Array.from(
+      { length: toYear - fromYear + 1 },
+      (_, i) => ({
+        value: fromYear + i,
+        label: String(fromYear + i),
+      })
+    );
+
+    return (
+      <div className="flex justify-center gap-2 p-2">
+        <Select onValueChange={handleMonthSelectChange} value={String(monthValue)}>
+          <SelectTrigger className="w-[110px] h-8 text-sm">
+            <SelectValue placeholder="Mes" />
+          </SelectTrigger>
+          <SelectContent>
+            {months.map((month) => (
+              <SelectItem key={month.value} value={String(month.value)}>
+                {month.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <Select onValueChange={handleYearSelectChange} value={String(yearValue)}>
+          <SelectTrigger className="w-[80px] h-8 text-sm">
+            <SelectValue placeholder="Año" />
+          </SelectTrigger>
+          <SelectContent>
+            {years.map((year) => (
+              <SelectItem key={year.value} value={String(year.value)}>
+                {year.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+    );
+  };
+
   return (
     <DayPicker
       showOutsideDays={showOutsideDays}
@@ -20,8 +101,7 @@ function Calendar({
       classNames={{
         months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
         month: "space-y-4",
-        caption: "flex justify-center pt-1 relative items-center",
-        caption_label: "text-sm font-medium",
+        caption: "flex justify-between pt-1 relative items-center",
         nav: "space-x-1 flex items-center",
         nav_button: cn(
           buttonVariants({ variant: "outline" }),
@@ -51,9 +131,21 @@ function Calendar({
         day_hidden: "invisible",
         ...classNames,
       }}
+      month={currentMonth} // Pass the controlled/internal month
+      onMonthChange={handleMonthChange} // Pass the controlled/internal onMonthChange
+      fromYear={fromYear}
+      toYear={toYear}
       components={{
         IconLeft: () => <ChevronLeft className="h-4 w-4" />,
         IconRight: () => <ChevronRight className="h-4 w-4" />,
+        Caption: (captionProps) => (
+          <CustomCaption
+            {...captionProps}
+            onMonthChange={handleMonthChange} // Pass the handler to CustomCaption
+            fromYear={fromYear}
+            toYear={toYear}
+          />
+        ),
       }}
       {...props}
     />
