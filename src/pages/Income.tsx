@@ -39,11 +39,34 @@ const incomeFormSchema = z.object({
       required_error: 'El monto es requerido.', // Message for undefined/null
       invalid_type_error: 'El monto debe ser un número.' // Message for non-numeric
     })
-    .positive({ message: 'El monto debe ser positivo.' })
   ),
   account: z.string().min(1, { message: 'La cuenta es requerida.' }),
   date: z.string().min(1, { message: 'La fecha es requerida.' }),
-  transaction_type: z.enum(['Ingreso', 'Anulacion', 'Devolucion'], { message: 'Tipo de transacción inválido.' }).optional(),
+  transaction_type: z.enum(['Ingreso', 'Anulacion', 'Devolucion'], { message: 'Tipo de transacción inválido.' }), // Made required
+})
+.refine((data) => {
+  // For 'Ingreso', amount must be strictly positive
+  if (data.transaction_type === 'Ingreso' && data.amount <= 0) {
+    return false;
+  }
+  // For 'Anulacion' and 'Devolucion', amount can be 0 or negative, which will be adjusted by transform.
+  // No specific positive check here.
+  return true;
+}, {
+  message: 'El monto para un ingreso debe ser positivo.',
+  path: ['amount'],
+})
+.transform((data) => {
+  let transformedAmount = data.amount;
+  if (data.transaction_type === 'Anulacion') {
+    transformedAmount = 0;
+  } else if (data.transaction_type === 'Devolucion') {
+    transformedAmount = -Math.abs(transformedAmount); // Ensure it's negative
+  }
+  return {
+    ...data,
+    amount: transformedAmount,
+  };
 });
 
 // Type for the data after Zod transformation (what onSubmit receives from resolver)
@@ -57,7 +80,7 @@ type IncomeFormInputValues = {
   amount: string; // Input field will hold a string
   account: string;
   date: string;
-  transaction_type: 'Ingreso' | 'Anulacion' | 'Devolucion' | undefined;
+  transaction_type: 'Ingreso' | 'Anulacion' | 'Devolucion'; // Made required
 };
 
 
@@ -69,7 +92,7 @@ const incomeColumns: ColumnDef<IngresoType>[] = [
       <Button
         variant="ghost"
         onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-        className="px-0 hover:bg-transparent"
+        className="px-0 hover:bg-transparent hover:text-accent"
       >
         Fecha
         <ArrowUpDown className="ml-2 h-4 w-4" />
@@ -103,7 +126,7 @@ const incomeColumns: ColumnDef<IngresoType>[] = [
       <Button
         variant="ghost"
         onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-        className="px-0 hover:bg-transparent"
+        className="px-0 hover:bg-transparent hover:text-accent"
       >
         Tipo Transacción
         <ArrowUpDown className="ml-2 h-4 w-4" />
@@ -116,9 +139,9 @@ const incomeColumns: ColumnDef<IngresoType>[] = [
     header: () => <div className="text-right">Monto</div>,
     cell: ({ row }) => {
       const amount = parseFloat(row.getValue('amount'));
-      const formattedAmount = new Intl.NumberFormat('es-CO', {
+      const formattedAmount = new Intl.NumberFormat('es-PE', { // Changed to es-PE and PEN
         style: 'currency',
-        currency: 'COP',
+        currency: 'PEN',
       }).format(amount);
       return <div className="text-right font-semibold text-success">{formattedAmount}</div>;
     },
@@ -158,13 +181,14 @@ function Income() {
       full_name: '',
       amount: '', // Changed default to empty string, now valid with IncomeFormInputValues
       account: '',
-      date: '',
-      transaction_type: undefined,
+      date: format(new Date(), 'yyyy-MM-dd'), // Default to today's date
+      transaction_type: 'Ingreso', // Default to 'Ingreso'
     },
   });
 
   const { handleSubmit, register, setValue, watch, formState: { errors } } = form;
   const watchedDni = watch('dni');
+  const watchedTransactionType = watch('transaction_type'); // Watch transaction type
 
   // Fetch accounts from Supabase
   const availableAccounts = accountsData.map(account => account.name);
@@ -203,6 +227,15 @@ function Income() {
     }
   }, [editingIncome, searchSocioByDni]);
 
+  // Effect to handle amount change based on transaction type
+  useEffect(() => {
+    if (watchedTransactionType === 'Anulacion') {
+      setValue('amount', '0', { shouldValidate: true });
+    }
+    // No specific action for 'Devolucion' here, as the transform handles the negation.
+    // User can input a positive number, and it will be stored as negative.
+  }, [watchedTransactionType, setValue]);
+
   // NEW: Function to close *only* the confirmation dialog
   const handleCloseConfirmationOnly = () => {
     setIsConfirmDialogOpen(false);
@@ -217,10 +250,10 @@ function Income() {
         receipt_number: income.receipt_number || '',
         dni: income.dni || '',
         full_name: income.full_name || '',
-        amount: income.amount.toString(), // Convert number to string for input value
+        amount: Math.abs(income.amount).toString(), // Display absolute value for 'Devolucion' in edit mode
         account: income.account || '',
         date: income.date,
-        transaction_type: income.transaction_type as IncomeFormInputValues['transaction_type'] || undefined,
+        transaction_type: income.transaction_type as IncomeFormInputValues['transaction_type'] || 'Ingreso', // Default to 'Ingreso' if undefined
       });
     } else {
       form.reset({
@@ -229,8 +262,8 @@ function Income() {
         full_name: '',
         amount: '', // Changed default to empty string
         account: '',
-        date: '',
-        transaction_type: undefined,
+        date: format(new Date(), 'yyyy-MM-dd'), // Default to today's date
+        transaction_type: 'Ingreso', // Default to 'Ingreso'
       });
     }
     setIsDialogOpen(true);
@@ -277,8 +310,8 @@ function Income() {
           full_name: '',
           amount: '', // Reset to empty string
           account: '',
-          date: '',
-          transaction_type: undefined,
+          date: format(new Date(), 'yyyy-MM-dd'), // Reset date to today
+          transaction_type: 'Ingreso', // Reset to 'Ingreso'
         });
         setEditingIncome(null); // Clear editing state
         handleCloseConfirmationOnly(); // Close only the confirmation dialog
@@ -432,6 +465,7 @@ function Income() {
                   {...register('amount')}
                   className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
                   placeholder="0.00" // Added placeholder
+                  readOnly={watchedTransactionType === 'Anulacion'} // Make read-only for 'Anulacion'
                 />
                 {errors.amount && <p className="col-span-4 text-right text-error text-sm">{errors.amount.message}</p>}
               </div>
@@ -505,6 +539,7 @@ function Income() {
                           }}
                           initialFocus
                           locale={es}
+                          toDate={new Date()} // Restrict to today
                         />
                       </PopoverContent>
                     </Popover>

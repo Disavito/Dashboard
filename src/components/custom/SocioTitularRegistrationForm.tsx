@@ -24,20 +24,19 @@ import axios from 'axios';
 
 // --- Zod Schemas ---
 const personalDataSchema = z.object({
+  dni: z.string().min(8, { message: 'El DNI debe tener 8 dígitos.' }).max(8, { message: 'El DNI debe tener 8 dígitos.' }).regex(/^\d{8}$/, { message: 'El DNI debe ser 8 dígitos numéricos.' }),
   nombres: z.string().min(1, { message: 'Los nombres son requeridos.' }).max(255, { message: 'Los nombres son demasiado largos.' }),
   apellidoPaterno: z.string().min(1, { message: 'El apellido paterno es requerido.' }).max(255, { message: 'El apellido paterno es demasiado largo.' }),
   apellidoMaterno: z.string().min(1, { message: 'El apellido materno es requerido.' }).max(255, { message: 'El apellido materno es demasiado largo.' }),
-  dni: z.string().min(8, { message: 'El DNI debe tener 8 dígitos.' }).max(8, { message: 'El DNI debe tener 8 dígitos.' }).regex(/^\d{8}$/, { message: 'El DNI debe ser 8 dígitos numéricos.' }),
   fechaNacimiento: z.string().min(1, { message: 'La fecha de nacimiento es requerida.' }),
   edad: z.number().int().min(0, { message: 'La edad no puede ser negativa.' }).optional().nullable(), // Edad es calculada, no se valida directamente como requerida
-  celular: z.string().min(9, { message: 'El celular debe tener al menos 9 dígitos.' }).max(15, { message: 'El celular es demasiado largo.' }).regex(/^\d+$/, { message: 'El celular debe contener solo números.' }),
+  celular: z.string().max(15, { message: 'El celular es demasiado largo.' }).regex(/^\d+$/, { message: 'El celular debe contener solo números.' }).optional().nullable(), // Made optional
   situacionEconomica: z.enum(['Pobre', 'Extremo Pobre'], { message: 'La situación económica es requerida.' }),
   direccionDNI: z.string().min(1, { message: 'La dirección DNI es requerida.' }).max(255, { message: 'La dirección DNI es demasiado larga.' }), // Made required
   regionDNI: z.string().min(1, { message: 'La región DNI es requerida.' }).max(255, { message: 'La región DNI es demasiado larga.' }), // Made required
   provinciaDNI: z.string().min(1, { message: 'La provincia DNI es requerida.' }).max(255, { message: 'La provincia DNI es demasiado larga.' }), // Made required
   distritoDNI: z.string().min(1, { message: 'El distrito DNI es requerido.' }).max(255, { message: 'El distrito DNI es demasiado larga.' }), // Made required
   localidad: z.string().min(1, { message: 'La localidad es requerida.' }).max(255, { message: 'La localidad es demasiado larga.' }), // Moved from addressDataSchema and made required
-  genero: z.string().optional().nullable(),
 });
 
 const addressDataSchema = z.object({
@@ -64,12 +63,6 @@ const economicSituationOptions: EconomicSituationOption[] = [
   { value: 'Extremo Pobre', label: 'Extremo Pobre' },
 ];
 
-const genderOptions = [
-  { value: 'Masculino', label: 'Masculino' },
-  { value: 'Femenino', label: 'Femenino' },
-  { value: 'Otro', label: 'Otro' },
-];
-
 // Helper function to calculate age
 const calculateAge = (dobString: string): number | null => {
   if (!dobString) return null;
@@ -94,10 +87,10 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
   const form = useForm<SocioTitularFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
+      dni: '',
       nombres: '',
       apellidoPaterno: '',
       apellidoMaterno: '',
-      dni: '',
       fechaNacimiento: '',
       edad: null,
       celular: '',
@@ -107,7 +100,6 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
       provinciaDNI: '',
       distritoDNI: '',
       localidad: '',
-      genero: undefined,
       
       regionVivienda: '',
       provinciaVivienda: '',
@@ -351,7 +343,6 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
             provinciaDNI: data.provinciaDNI || '',
             distritoDNI: data.distritoDNI || '',
             edad: data.edad || null,
-            genero: data.genero || undefined, // Added
           });
         }
       }
@@ -369,7 +360,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
     setIsDniSearching(true);
     const { data, error } = await supabase
       .from('socio_titulares')
-      .select('nombres, apellidoPaterno, apellidoMaterno, fechaNacimiento, edad, celular, direccionDNI, regionDNI, provinciaDNI, distritoDNI, localidad, genero') // Updated select fields
+      .select('nombres, apellidoPaterno, apellidoMaterno, fechaNacimiento, edad, celular, direccionDNI, regionDNI, provinciaDNI, distritoDNI, localidad') // Updated select fields
       .eq('dni', dni)
       .single();
 
@@ -387,7 +378,6 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
       setValue('provinciaDNI', '');
       setValue('distritoDNI', '');
       setValue('localidad', ''); // Clear new 'localidad' field
-      setValue('genero', undefined); // Clear new 'genero' field
     } else if (data) {
       setValue('nombres', data.nombres);
       setValue('apellidoPaterno', data.apellidoPaterno);
@@ -400,7 +390,6 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
       setValue('provinciaDNI', data.provinciaDNI);
       setValue('distritoDNI', data.distritoDNI);
       setValue('localidad', data.localidad); // Set new 'localidad' field
-      setValue('genero', data.genero || undefined); // Set new 'genero' field
       toast.success('Socio encontrado en la base de datos', { description: `Nombre: ${data.nombres} ${data.apellidoPaterno}` });
     } else {
       setValue('nombres', '');
@@ -414,7 +403,6 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
       setValue('provinciaDNI', '');
       setValue('distritoDNI', '');
       setValue('localidad', ''); // Clear new 'localidad' field
-      setValue('genero', undefined); // Clear new 'genero' field
       toast.warning('DNI no encontrado en la base de datos', { description: 'No se encontró un socio con este DNI. Puedes consultar Reniec.' });
     }
     setIsDniSearching(false);
@@ -467,10 +455,10 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
         onSuccess();
         
         reset({
+          dni: '',
           nombres: '',
           apellidoPaterno: '',
           apellidoMaterno: '',
-          dni: '',
           fechaNacimiento: '',
           edad: null,
           celular: '',
@@ -480,7 +468,6 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
           provinciaDNI: '',
           distritoDNI: '',
           localidad: '',
-          genero: undefined,
 
           regionVivienda: '',
           provinciaVivienda: '',
@@ -511,7 +498,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
               onClick={() => setActiveTab('personal')}
               className={cn(
                 "py-2 px-4 text-lg font-semibold transition-colors duration-300",
-                activeTab === 'personal' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'
+                activeTab === 'personal' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
               )}
             >
               Datos Personales
@@ -522,7 +509,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
               onClick={() => setActiveTab('address')}
               className={cn(
                 "py-2 px-4 text-lg font-semibold transition-colors duration-300",
-                activeTab === 'address' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:text-foreground'
+                activeTab === 'address' ? 'text-primary border-b-2 border-primary' : 'text-muted-foreground hover:bg-muted/50 hover:text-foreground'
               )}
             >
               Datos de Vivienda
@@ -532,9 +519,6 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
           <div className="p-4 space-y-4">
             {activeTab === 'personal' && (
               <>
-                {renderInputField('nombres', 'Nombres', 'Ej: Juan Carlos', 'text', isReniecSearching)}
-                {renderInputField('apellidoPaterno', 'Apellido Paterno', 'Ej: García', 'text', isReniecSearching)}
-                {renderInputField('apellidoMaterno', 'Apellido Materno', 'Ej: Pérez', 'text', isReniecSearching)}
                 <div className="grid grid-cols-4 items-center gap-4">
                   <Label htmlFor="dni" className="text-right text-textSecondary">
                     DNI
@@ -565,6 +549,9 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                   </div>
                   {errors.dni && <p className="col-span-4 text-right text-error text-sm">{errors.dni?.message}</p>}
                 </div>
+                {renderInputField('nombres', 'Nombres', 'Ej: Juan Carlos', 'text', isReniecSearching)}
+                {renderInputField('apellidoPaterno', 'Apellido Paterno', 'Ej: García', 'text', isReniecSearching)}
+                {renderInputField('apellidoMaterno', 'Apellido Materno', 'Ej: Pérez', 'text', isReniecSearching)}
                 <FormField
                   control={form.control}
                   name="fechaNacimiento"
@@ -577,8 +564,9 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                             <Button
                               variant={"outline"}
                               className={cn(
-                                "col-span-3 w-full justify-start text-left font-normal rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300",
-                                !field.value && "text-muted-foreground"
+                                "col-span-3 w-full justify-start text-left font-normal rounded-lg border-border bg-background text-foreground focus:ring-success focus:border-success transition-all duration-300",
+                                !field.value && "text-muted-foreground",
+                                "hover:bg-success/10 hover:text-success"
                               )}
                               disabled={isReniecSearching}
                             >
@@ -610,7 +598,6 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                 {renderInputField('provinciaDNI', 'Provincia DNI', 'Ej: Lima', 'text', isReniecSearching)}
                 {renderInputField('distritoDNI', 'Distrito DNI', 'Ej: Miraflores', 'text', isReniecSearching)}
                 {renderInputField('celular', 'Celular (Opcional)', 'Ej: 987654321', 'tel', isReniecSearching)}
-                {renderRadioGroupField('genero', 'Género', genderOptions)}
                 {renderRadioGroupField('situacionEconomica', 'Situación Económica', economicSituationOptions)}
 
                 <div className="flex justify-end mt-6">

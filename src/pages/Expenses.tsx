@@ -71,7 +71,7 @@ const expenseColumns: ColumnDef<GastoType>[] = [
       <Button
         variant="ghost"
         onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-        className="px-0 hover:bg-transparent"
+        className="px-0 hover:bg-transparent hover:text-accent"
       >
         Fecha
         <ArrowUpDown className="ml-2 h-4 w-4" />
@@ -95,7 +95,7 @@ const expenseColumns: ColumnDef<GastoType>[] = [
       <Button
         variant="ghost"
         onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-        className="px-0 hover:bg-transparent"
+        className="px-0 hover:bg-transparent hover:text-accent"
       >
         Categoría
         <ArrowUpDown className="ml-2 h-4 w-4" />
@@ -123,9 +123,9 @@ const expenseColumns: ColumnDef<GastoType>[] = [
     header: () => <div className="text-right">Monto</div>,
     cell: ({ row }) => {
       const amount = parseFloat(row.getValue('amount'));
-      const formattedAmount = new Intl.NumberFormat('es-CO', {
+      const formattedAmount = new Intl.NumberFormat('es-PE', { // Changed to es-PE and PEN
         style: 'currency',
-        currency: 'COP',
+        currency: 'PEN',
       }).format(amount);
       return <div className="text-right font-semibold text-error">{formattedAmount}</div>;
     },
@@ -574,6 +574,7 @@ function Expenses() {
                           }}
                           initialFocus
                           locale={es}
+                          toDate={new Date()} // Restrict to today
                         />
                       </PopoverContent>
                     </Popover>

@@ -95,7 +95,7 @@ export function DataTable<TData, TValue>({
           )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="ml-auto rounded-lg border-border hover:bg-muted/50 transition-all duration-300">
+              <Button variant="outline" className="ml-auto rounded-lg border-border hover:bg-muted/100 hover:text-foreground transition-all duration-300">
                 Columnas <ChevronDown className="ml-2 h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>

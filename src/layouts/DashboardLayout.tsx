@@ -22,7 +22,7 @@ const navItems = [
   { name: 'Resumen', path: '/', icon: LayoutDashboard },
   { name: 'Ingresos', path: '/income', icon: ArrowUpCircle },
   { name: 'Gastos', path: '/expenses', icon: ArrowDownCircle },
-  { name: 'Socios Titulares', path: '/people', icon: UserCheck }, // New navigation item
+  { name: 'Titulares', path: '/people', icon: UserCheck }, // New navigation item
   // { name: 'Colaboradores', path: '/collaborators', icon: Handshake }, // If you decide to have a separate collaborators page
 ];
 

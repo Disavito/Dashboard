@@ -11,69 +11,65 @@
     --card-foreground: 0 0% 3.9%;
     --popover: 0 0% 100%;
     --popover-foreground: 0 0% 3.9%;
-    
-    /* CAMBIOS AQUÍ para los botones azules */
-    --primary: 210 100% 50%; /* Nuevo azul */
-    --primary-foreground: 0 0% 100%; /* Texto blanco para contraste */
-    
-    --secondary: 200 92% 60%; 
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 326 87% 70%;
-    --accent-foreground: 0 0% 9%;
-    
-    /* CAMBIOS AQUÍ para los botones verdes (si quieres que 'destructive' sea verde) */
-    --destructive: 120 70% 40%; /* Nuevo verde */
-    --destructive-foreground: 0 0% 100%; /* Texto blanco para contraste */
-    
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 210 100% 50%; /* También podrías querer que el anillo (ring) sea azul */
-    
-    --success: 158 82% 39%;
+
+    /* Azul primario para botones principales */
+    --primary: 210 100% 50%;
+    --primary-foreground: 0 0% 100%;
+
+    /* Gris claro para botones secundarios */
+    --secondary: 210 20% 95%;
+    --secondary-foreground: 210 10% 20%;
+
+    /* Verde corporativo para acentos (como el calendario) */
+    --accent: 140 70% 35%; /* Este es un verde más oscuro y corporativo */
+    --accent-foreground: 0 0% 100%; /* Texto blanco para contraste */
+
+    /* Colores para elementos secundarios (grises) */
+    --muted: 210 20% 96%;
+    --muted-foreground: 210 10% 40%;
+
+    /* Éxito (verde) y Destructivo (rojo) */
+    --success: 140 70% 40%;
     --success-foreground: 0 0% 100%;
-    --warning: 39 94% 50%;
-    --warning-foreground: 0 0% 100%;
-    --error: 0 84% 60%; /* Si quieres que el error siga siendo rojo */
-    --error-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Bordes e Input */
+    --border: 210 20% 85%;
+    --input: 210 20% 85%;
+    --ring: 210 100% 50%;
+
     --radius: 0.5rem;
   }
-
-  /* TEMA OSCURO */
+  /* Tema Oscuro */
   .dark {
-    --background: 0 0% 9%;
-    --foreground: 0 0% 100%;
-    --card: 0 0% 15%;
-    --card-foreground: 0 0% 100%;
-    --popover: 0 0% 15%;
-    --popover-foreground: 0 0% 100%;
-    
-    /* CAMBIOS AQUÍ para los botones azules en modo oscuro */
-    --primary: 210 100% 60%; /* Un azul ligeramente más claro para el modo oscuro, o el mismo */
-    --primary-foreground: 0 0% 9%; /* Texto oscuro para contraste */
-    
-    --secondary: 200 92% 60%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 18%;
-    --muted-foreground: 0 0% 64%;
-    --accent: 326 87% 70%;
+    --background: 210 10% 10%;
+    --foreground: 210 10% 90%;
+    --card: 210 10% 15%;
+    --card-foreground: 210 10% 90%;
+    --popover: 210 10% 15%;
+    --popover-foreground: 210 10% 90%;
+
+    --primary: 210 100% 60%;
+    --primary-foreground: 0 0% 9%;
+
+    --secondary: 210 20% 20%;
+    --secondary-foreground: 210 10% 80%;
+
+    --accent: 140 70% 45%;
     --accent-foreground: 0 0% 9%;
-    
-    /* CAMBIOS AQUÍ para los botones verdes en modo oscuro */
-    --destructive: 120 70% 50%; /* Un verde ligeramente más claro para el modo oscuro, o el mismo */
-    --destructive-foreground: 0 0% 100%; /* Texto blanco para contraste */
-    
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
-    --ring: 210 100% 60%; /* También para el anillo en modo oscuro */
-    
-    --success: 158 82% 39%;
+
+    --muted: 210 10% 25%;
+    --muted-foreground: 210 10% 60%;
+
+    --success: 140 70% 50%;
     --success-foreground: 0 0% 100%;
-    --warning: 39 94% 50%;
-    --warning-foreground: 0 0% 100%;
-    --error: 0 84% 60%;
-    --error-foreground: 0 0% 100%;
+    --destructive: 0 84% 70%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 10% 20%;
+    --input: 210 10% 20%;
+    --ring: 210 100% 60%;
   }
 }
 

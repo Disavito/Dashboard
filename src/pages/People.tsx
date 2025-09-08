@@ -54,7 +54,7 @@ const socioTitularBaseColumns: ColumnDef<SocioTitularWithPaymentStatus>[] = [
       <Button
         variant="ghost"
         onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-        className="px-0 hover:bg-transparent"
+        className="px-0 hover:bg-transparent hover:text-accent"
       >
         Nombres
         <ArrowUpDown className="ml-2 h-4 w-4" />

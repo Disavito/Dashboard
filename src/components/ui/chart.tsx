@@ -36,33 +36,23 @@ function useChart() {
   return context
 }
 
-// --- ChartContainer ---
+// --- ChartContainer (wrapper for the entire chart) ---
 export const ChartContainer = React.forwardRef<
   HTMLDivElement,
   React.ComponentPropsWithoutRef<"div"> & {
     config: ChartConfig
-    children: React.ReactNode
   }
->(({ config, children, className, ...props }, ref) => {
-  const newConfig = React.useMemo(() => {
-    if (config === null || typeof config !== "object") {
-      return {} as ChartConfig
-    }
-    return config
-  }, [config])
-
-  return (
-    <ChartContext.Provider value={{ config: newConfig }}>
-      <div
-        ref={ref}
-        className={cn("flex aspect-video h-[300px] w-full flex-col", className)}
-        {...props}
-      >
-        {children}
-      </div>
-    </ChartContext.Provider>
-  )
-})
+>(({ config, className, children, ...props }, ref) => (
+  <ChartContext.Provider value={{ config }}>
+    <div
+      ref={ref}
+      className={cn("flex h-[300px] w-full flex-col items-center justify-center", className)}
+      {...props}
+    >
+      {children}
+    </div>
+  </ChartContext.Provider>
+))
 ChartContainer.displayName = "ChartContainer"
 
 // --- ChartTooltipContent (renders the actual tooltip content) ---
@@ -100,7 +90,7 @@ export const ChartTooltipContent = React.forwardRef<
           const key = item.dataKey as keyof ChartConfig
           const itemConfig = config[key]
           const value = item.value
-          const formattedValue = typeof value === "number" ? new Intl.NumberFormat("es-CO", { style: "currency", currency: "COP" }).format(value) : value
+          const formattedValue = typeof value === "number" ? new Intl.NumberFormat("es-PE", { style: "currency", currency: "PEN" }).format(value) : value // Changed to es-PE and PEN
 
           return (
             <div
@@ -242,8 +232,8 @@ export const Chart = React.forwardRef<HTMLDivElement, ChartProps>(
               axisLine={false}
               tickMargin={8}
               tickFormatter={(value) => {
-                const date = new Date(value)
-                return date.toLocaleDateString("es-ES", { month: "short", day: "numeric" })
+                // Assuming value is already formatted as 'MMM yy' or similar for chartData
+                return value;
               }}
               className="text-xs text-muted-foreground"
             />
@@ -251,7 +241,7 @@ export const Chart = React.forwardRef<HTMLDivElement, ChartProps>(
               tickLine={false}
               axisLine={false}
               tickMargin={8}
-              tickFormatter={(value) => new Intl.NumberFormat('es-CO', { style: 'currency', currency: 'COP', notation: 'compact' }).format(value)}
+              tickFormatter={(value) => new Intl.NumberFormat('es-PE', { style: 'currency', currency: 'PEN', notation: 'compact' }).format(value)} // Changed to es-PE and PEN
               className="text-xs text-muted-foreground"
             />
             <ChartTooltip
