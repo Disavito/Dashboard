@@ -492,6 +492,26 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
 
   const onSubmit = async (values: SocioTitularFormValues, event?: React.BaseSyntheticEvent) => {
     event?.preventDefault();
+
+    // Manually trigger validation to ensure errors are populated
+    const result = await form.trigger();
+
+    if (!result) {
+      // If validation fails, show a toast and focus on the first error field
+      toast.error('Error de validación', { description: 'Por favor, corrige los campos marcados.' });
+      const firstErrorField = Object.keys(errors)[0] as keyof SocioTitularFormValues;
+      if (firstErrorField) {
+        form.setFocus(firstErrorField);
+        // Optionally, switch tab if the error is in the other tab
+        if (['regionVivienda', 'provinciaVivienda', 'distritoVivienda', 'direccionVivienda', 'mz', 'lote'].includes(firstErrorField)) {
+          setActiveTab('address');
+        } else {
+          setActiveTab('personal');
+        }
+      }
+      return;
+    }
+
     setDataToConfirm(values);
     setIsConfirmDialogOpen(true);
   };
@@ -501,6 +521,29 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
 
     setIsConfirmingSubmission(true);
     try {
+      // --- DNI Uniqueness Check ---
+      const { data: existingSocios, error: dniCheckError } = await supabase
+        .from('socio_titulares')
+        .select('id')
+        .eq('dni', dataToConfirm.dni);
+
+      if (dniCheckError) {
+        throw new Error(`Error al verificar DNI: ${dniCheckError.message}`);
+      }
+
+      const isDuplicateDni = existingSocios && existingSocios.length > 0 &&
+                             (socioId === undefined || existingSocios[0].id !== socioId);
+
+      if (isDuplicateDni) {
+        toast.error('DNI Duplicado', { description: 'Ya existe un socio registrado con este DNI.' });
+        form.setError('dni', { type: 'manual', message: 'Este DNI ya está registrado.' });
+        form.setFocus('dni');
+        setIsConfirmDialogOpen(false); // Close confirmation dialog
+        setIsConfirmingSubmission(false);
+        return; // Stop submission
+      }
+      // --- End DNI Uniqueness Check ---
+
       const dataToSave: Partial<SocioTitular> = {
         ...dataToConfirm,
       };

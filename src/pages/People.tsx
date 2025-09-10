@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   ColumnDef,
-  Row, // Import Row type from @tanstack/react-table
+  Row,
 } from '@tanstack/react-table';
 import { ArrowUpDown, PlusCircle, Loader2, Edit, Trash2, Search, ChevronDown, Check } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -19,7 +19,6 @@ import { supabase } from '@/lib/supabaseClient';
 import { SocioTitular } from '@/lib/types';
 import SocioTitularRegistrationForm from '@/components/custom/SocioTitularRegistrationForm';
 import ConfirmationDialog from '@/components/ui-custom/ConfirmationDialog';
-// import { Link } from 'react-router-dom'; // Removed Link import
 import { DataTable } from '@/components/ui-custom/DataTable';
 import {
   Popover,
@@ -55,6 +54,9 @@ function People() {
   // State for editing socio in a dialog
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [socioToEdit, setSocioToEdit] = useState<SocioTitular | null>(null);
+
+  // State for data displayed in the table, pre-filtered by locality
+  const [displaySocios, setDisplaySocios] = useState<SocioTitular[]>([]);
 
 
   const fetchSocios = useCallback(async () => {
@@ -97,6 +99,16 @@ function People() {
     fetchSocios();
     fetchUniqueLocalities();
   }, [fetchSocios, fetchUniqueLocalities]);
+
+  // Effect to filter socios based on selectedLocalidadFilter before passing to DataTable
+  useEffect(() => {
+    let filtered = socios;
+    if (selectedLocalidadFilter !== 'all') {
+      filtered = socios.filter(socio => socio.localidad?.toLowerCase() === selectedLocalidadFilter.toLowerCase());
+    }
+    setDisplaySocios(filtered);
+  }, [socios, selectedLocalidadFilter]);
+
 
   const handleDeleteSocio = async () => {
     if (!socioToDelete) return;
@@ -194,7 +206,6 @@ function People() {
           const socio = row.original;
           return (
             <div className="flex space-x-2">
-              {/* Changed Link to Button to open edit dialog */}
               <Button
                 variant="ghost"
                 size="icon"
@@ -225,19 +236,19 @@ function People() {
     []
   );
 
+  // Custom global filter function for DataTable (now only handles text search)
   const customGlobalFilterFn = useCallback((row: Row<SocioTitular>, _columnId: string, filterValue: any) => {
-    const search = String(filterValue).toLowerCase(); // Ensure filterValue is a string for comparison
-    const socio = row.original; // Access the original SocioTitular object
+    const search = String(filterValue).toLowerCase();
+    const socio = row.original;
 
     const dni = socio.dni?.toLowerCase() || '';
     const nombres = socio.nombres?.toLowerCase() || '';
     const apellidoPaterno = socio.apellidoPaterno?.toLowerCase() || '';
     const apellidoMaterno = socio.apellidoMaterno?.toLowerCase() || '';
     const celular = socio.celular?.toLowerCase() || '';
-    const localidad = socio.localidad?.toLowerCase() || '';
+    const localidad = socio.localidad?.toLowerCase() || ''; // Keep locality in search for global text search
 
-    // Global text search
-    const matchesGlobalFilter = (
+    return (
       dni.includes(search) ||
       nombres.includes(search) ||
       apellidoPaterno.includes(search) ||
@@ -245,14 +256,7 @@ function People() {
       celular.includes(search) ||
       localidad.includes(search)
     );
-
-    // Locality filter
-    const matchesLocalityFilter =
-      selectedLocalidadFilter === 'all' ||
-      localidad === selectedLocalidadFilter.toLowerCase(); // Compare with lowercase selected filter
-
-    return matchesGlobalFilter && matchesLocalityFilter;
-  }, [selectedLocalidadFilter]); // Re-run if selectedLocalidadFilter changes
+  }, []); // No dependency on selectedLocalidadFilter anymore, as it's handled upstream
 
   if (loading) {
     return (
@@ -290,7 +294,7 @@ function People() {
       </header>
 
       <div className="container mx-auto py-10 bg-surface rounded-xl shadow-lg p-6">
-        <div className="flex flex-col md:flex-row items-center justify-between mb-6 gap-4"> {/* Responsive layout for filters */}
+        <div className="flex flex-col md:flex-row items-center justify-between mb-6 gap-4">
           <div className="relative flex items-center w-full max-w-md">
             <Search className="absolute left-3 h-5 w-5 text-textSecondary" />
             <Input
@@ -376,10 +380,10 @@ function People() {
 
         <DataTable
           columns={columns}
-          data={socios}
+          data={displaySocios} // Pass the pre-filtered data
           globalFilter={globalFilter}
           setGlobalFilter={setGlobalFilter}
-          customGlobalFilterFn={customGlobalFilterFn}
+          customGlobalFilterFn={customGlobalFilterFn} // This now only handles text search
         />
       </div>
 
@@ -418,7 +422,7 @@ function People() {
         description={`¿Estás seguro de que deseas eliminar al socio ${socioToDelete?.nombres} ${socioToDelete?.apellidoPaterno}? Esta acción no se puede deshacer.`}
         confirmButtonText="Eliminar"
         isConfirming={isDeleting}
-        data={socioToDelete || {}} // Pass socioToDelete here, or an empty object if null
+        data={socioToDelete || {}}
       />
     </div>
   );
