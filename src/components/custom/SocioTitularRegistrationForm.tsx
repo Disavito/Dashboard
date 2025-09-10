@@ -183,11 +183,11 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
     onBlur?: () => void
   ) => {
     return (
-      <div className="grid grid-cols-4 items-center gap-4">
-        <Label htmlFor={id} className="text-right text-textSecondary">
+      <div className="flex flex-col sm:grid sm:grid-cols-4 sm:items-center gap-2 sm:gap-4">
+        <Label htmlFor={id} className="sm:text-right text-textSecondary">
           {label}
         </Label>
-        <div className="col-span-3 relative">
+        <div className="col-span-full sm:col-span-3 relative">
           <Input
             id={id}
             type={type}
@@ -201,7 +201,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
             <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />
           )}
         </div>
-        {errors[id] && <p className="col-span-4 text-right text-error text-sm">{errors[id]?.message}</p>}
+        {errors[id] && <p className="col-span-full sm:col-span-4 text-right text-error text-sm">{errors[id]?.message}</p>}
       </div>
     );
   };
@@ -214,11 +214,11 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
     isSearching: boolean = false
   ) => {
     return (
-      <div className="grid grid-cols-4 items-center gap-4">
-        <Label htmlFor={id} className="text-right text-textSecondary">
+      <div className="flex flex-col sm:grid sm:grid-cols-4 sm:items-center gap-2 sm:gap-4">
+        <Label htmlFor={id} className="sm:text-right text-textSecondary">
           {label}
         </Label>
-        <div className="col-span-3 relative">
+        <div className="col-span-full sm:col-span-3 relative">
           <Textarea
             id={id}
             {...register(id)}
@@ -230,7 +230,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
             <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />
           )}
         </div>
-        {errors[id] && <p className="col-span-4 text-right text-error text-sm">{errors[id]?.message}</p>}
+        {errors[id] && <p className="col-span-full sm:col-span-4 text-right text-error text-sm">{errors[id]?.message}</p>}
       </div>
     );
   };
@@ -245,9 +245,9 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
         control={control}
         name={id}
         render={({ field }) => (
-          <FormItem className="grid grid-cols-4 items-center gap-4">
-            <FormLabel className="text-right text-textSecondary">{label}</FormLabel>
-            <FormControl className="col-span-3">
+          <FormItem className="flex flex-col sm:grid sm:grid-cols-4 sm:items-center gap-2 sm:gap-4">
+            <FormLabel className="sm:text-right text-textSecondary">{label}</FormLabel>
+            <FormControl className="col-span-full sm:col-span-3">
               <RadioGroup
                 onValueChange={field.onChange}
                 value={field.value as string}
@@ -261,7 +261,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                 ))}
               </RadioGroup>
             </FormControl>
-            {errors[id] && <FormMessage className="col-span-4 text-right">{errors[id]?.message}</FormMessage>}
+            {errors[id] && <FormMessage className="col-span-full sm:col-span-4 text-right">{errors[id]?.message}</FormMessage>}
           </FormItem>
         )}
       />
@@ -585,14 +585,14 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
             </Button>
           </div>
 
-          <div className="p-4 space-y-4">
+          <div className="p-4 space-y-4 overflow-y-auto max-h-[70vh]"> {/* Added overflow-y-auto and max-h */}
             {activeTab === 'personal' && (
               <>
-                <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="dni" className="text-right text-textSecondary">
+                <div className="flex flex-col sm:grid sm:grid-cols-4 sm:items-center gap-2 sm:gap-4">
+                  <Label htmlFor="dni" className="sm:text-right text-textSecondary">
                     DNI
                   </Label>
-                  <div className="col-span-3 relative flex items-center gap-2">
+                  <div className="col-span-full sm:col-span-3 relative flex items-center gap-2">
                     <Input
                       id="dni"
                       type="text"
@@ -616,7 +616,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                       </Button>
                     )}
                   </div>
-                  {errors.dni && <p className="col-span-4 text-right text-error text-sm">{errors.dni?.message}</p>}
+                  {errors.dni && <p className="col-span-full sm:col-span-4 text-right text-error text-sm">{errors.dni?.message}</p>}
                 </div>
                 {renderInputField('nombres', 'Nombres', 'Ej: Juan Carlos', 'text', isReniecSearching)}
                 {renderInputField('apellidoPaterno', 'Apellido Paterno', 'Ej: García', 'text', isReniecSearching)}
@@ -625,15 +625,15 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                   control={form.control}
                   name="fechaNacimiento"
                   render={({ field }) => (
-                    <FormItem className="grid grid-cols-4 items-center gap-4">
-                      <FormLabel className="text-right text-textSecondary">Fecha Nacimiento</FormLabel>
+                    <FormItem className="flex flex-col sm:grid sm:grid-cols-4 sm:items-center gap-2 sm:gap-4">
+                      <FormLabel className="sm:text-right text-textSecondary">Fecha Nacimiento</FormLabel>
                       <Popover>
                         <PopoverTrigger asChild>
                           <FormControl>
                             <Button
                               variant={"outline"}
                               className={cn(
-                                "col-span-3 w-full justify-start text-left font-normal rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300",
+                                "col-span-full sm:col-span-3 w-full justify-start text-left font-normal rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300",
                                 !field.value && "text-muted-foreground",
                                 "hover:bg-success/10 hover:text-success"
                               )}
@@ -656,7 +656,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                           />
                         </PopoverContent>
                       </Popover>
-                      <FormMessage className="col-span-4 text-right" />
+                      <FormMessage className="col-span-full sm:col-span-4 text-right" />
                     </FormItem>
                   )}
                 />
@@ -667,8 +667,8 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                   control={form.control}
                   name="localidad"
                   render={({ field }) => (
-                    <FormItem className="grid grid-cols-4 items-center gap-4">
-                      <FormLabel className="text-right text-textSecondary">Localidad</FormLabel>
+                    <FormItem className="flex flex-col sm:grid sm:grid-cols-4 sm:items-center gap-2 sm:gap-4">
+                      <FormLabel className="sm:text-right text-textSecondary">Localidad</FormLabel>
                       <Popover open={openLocalitiesPopover} onOpenChange={setOpenLocalitiesPopover}>
                         <PopoverTrigger asChild>
                           <FormControl>
@@ -676,7 +676,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                               variant="outline"
                               role="combobox"
                               aria-expanded={openLocalitiesPopover}
-                              className="col-span-3 w-full justify-between rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+                              className="col-span-full sm:col-span-3 w-full justify-between rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
                               disabled={isReniecSearching || isLocalitiesLoading}
                             >
                               {field.value
@@ -725,7 +725,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                           </Command>
                         </PopoverContent>
                       </Popover>
-                      <FormMessage className="col-span-4 text-right" />
+                      <FormMessage className="col-span-full sm:col-span-4 text-right" />
                     </FormItem>
                   )}
                 />
