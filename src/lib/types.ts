@@ -1,75 +1,78 @@
-export type SituacionEconomica = 'Pobre' | 'Extremo Pobre';
+export type EconomicSituation = 'Pobre' | 'Extremo Pobre';
 
-export interface Colaborador {
-  id: string; // uuid
-  name: string; // Updated from 'nombres' to 'name' as per new SQL schema
-  apellidos: string | null; // New field as per new SQL schema, replaces apellidoPaterno and apellidoMaterno
-  dni: string | null;
-  cargo: string | null;
-  created_at: string; // timestamp with time zone
-}
-
-export interface Cuenta {
-  id: string; // uuid
-  name: string;
-  created_at: string | null; // timestamp with time zone
-}
-
-export interface Gasto {
-  id: string; // uuid
-  amount: number; // numeric
-  account: string;
-  date: string; // date (YYYY-MM-DD)
-  category: string;
-  sub_category: string | null;
-  description: string | null;
-  created_at: string; // timestamp with time zone
-  numero_gasto: string | null; // text UNIQUE
-  colaborador_id: string | null; // uuid, foreign key to colaboradores
-}
-
-export interface Ingreso {
-  id: number; // bigint GENERATED ALWAYS AS IDENTITY
-  receipt_number: string; // text UNIQUE
-  dni: string; // text, foreign key to socio_titulares
-  full_name: string;
-  amount: number; // numeric
-  account: string;
-  date: string; // date (YYYY-MM-DD)
-  transaction_type: string;
-  created_at: string; // timestamp with time zone
-}
-
-export interface SocioTitular {
-  id: string; // uuid
-  nombres: string;
-  apellidoMaterno: string;
-  apellidoPaterno: string;
-  dni: string | null; // character varying UNIQUE
-  created_at: string | null; // timestamp with time zone
-  // ubicacionReferencia: string | null; // This maps to referenciaVivienda - REMOVED
-  direccionDNI: string | null;
-  edad: number | null; // integer
-  distritoDNI: string | null;
-  provinciaDNI: string | null;
-  regionDNI: string | null;
-  fechaNacimiento: string | null; // text
-  celular: string | null; // character varying
-  direccionVivienda: string | null;
-  mz: string | null;
-  lote: string | null;
-  distritoVivienda: string | null;
-  provinciaVivienda: string | null;
-  regionVivienda: string | null;
-  situacionEconomica: SituacionEconomica | null; // text CHECK ('Pobre' or 'Extremo Pobre')
-  genero: string | null; // Added as per SQL schema
-  localidad: string | null; // Added as per SQL schema
-}
-
-// New interface for economic situation options
 export interface EconomicSituationOption {
-  value: string;
+  value: EconomicSituation;
   label: string;
 }
 
+export interface SocioTitular {
+  id: number;
+  dni: string;
+  nombres: string;
+  apellidoPaterno: string;
+  apellidoMaterno: string;
+  fechaNacimiento: string;
+  edad: number | null;
+  celular: string | null;
+  situacionEconomica: EconomicSituation;
+  direccionDNI: string;
+  regionDNI: string;
+  provinciaDNI: string;
+  distritoDNI: string;
+  localidad: string;
+  regionVivienda: string | null;
+  provinciaVivienda: string | null;
+  distritoVivienda: string | null;
+  direccionVivienda: string | null;
+  mz: string | null;
+  lote: string | null;
+  created_at: string;
+}
+
+export interface Cuenta {
+  id: number;
+  name: string;
+  balance: number;
+  created_at: string;
+}
+
+export interface Ingreso {
+  id: number;
+  receipt_number: string;
+  dni: string;
+  full_name: string;
+  amount: number;
+  account: string;
+  date: string;
+  transaction_type: 'Ingreso' | 'Anulacion' | 'Devolucion';
+  numeroOperacion: string | null; // Campo corregido
+  created_at: string;
+}
+
+// NEW: Gasto Interface
+export interface Gasto {
+  id: number;
+  category: string;
+  subcategory: string | null; // Corregido a subcategory
+  description: string | null;
+  amount: number;
+  date: string;
+  numero_gasto: string | null; // Permitir que sea null
+  colaborador_id: string | null; // Link to a collaborator if applicable (UUID string)
+  account: string; // Añadido el campo account
+  created_at: string;
+}
+
+// NEW: Colaborador Interface
+export interface Colaborador {
+  id: string; // Cambiado a string para UUID
+  name: string; // Cambiado de nombres a name para consistencia
+  apellidos: string; // Añadido apellidos
+  dni: string;
+  celular: string | null;
+  email: string | null;
+  created_at: string;
+}
+
+// NEW: Transaction Type (Union of Ingreso and Gasto)
 export type Transaction = Ingreso | Gasto;

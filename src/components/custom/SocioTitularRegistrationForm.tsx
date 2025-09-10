@@ -10,7 +10,7 @@ import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { toast } from 'sonner';
 import { supabase } from '@/lib/supabaseClient';
 import { SocioTitular, EconomicSituationOption } from '@/lib/types';
-import { Loader2, CalendarIcon } from 'lucide-react';
+import { Loader2, CalendarIcon, Check } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { format, parseISO, differenceInYears } from 'date-fns';
@@ -20,6 +20,14 @@ import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '
 import ConfirmationDialog from '@/components/ui-custom/ConfirmationDialog';
 import { DialogFooter } from '@/components/ui/dialog';
 import axios from 'axios';
+import {
+  Command,
+  CommandInput,
+  CommandList,
+  CommandEmpty,
+  CommandGroup,
+  CommandItem,
+} from '@/components/ui/command';
 
 
 // --- Zod Schemas ---
@@ -29,14 +37,25 @@ const personalDataSchema = z.object({
   apellidoPaterno: z.string().min(1, { message: 'El apellido paterno es requerido.' }).max(255, { message: 'El apellido paterno es demasiado largo.' }),
   apellidoMaterno: z.string().min(1, { message: 'El apellido materno es requerido.' }).max(255, { message: 'El apellido materno es demasiado largo.' }),
   fechaNacimiento: z.string().min(1, { message: 'La fecha de nacimiento es requerida.' }),
-  edad: z.number().int().min(0, { message: 'La edad no puede ser negativa.' }).optional().nullable(), // Edad es calculada, no se valida directamente como requerida
-  celular: z.string().max(15, { message: 'El celular es demasiado largo.' }).regex(/^\d+$/, { message: 'El celular debe contener solo números.' }).optional().nullable(), // Made optional
+  edad: z.number().int().min(0, { message: 'La edad no puede ser negativa.' }).optional().nullable(),
+  celular: z.string()
+    .max(15, { message: 'El celular es demasiado largo.' })
+    .optional()
+    .nullable()
+    .refine((val) => {
+      if (val === null || val === undefined || val === '') {
+        return true; // Permite null, undefined o cadena vacía
+      }
+      return /^\d+$/.test(val); // Aplica regex solo si hay un valor
+    }, {
+      message: 'El celular debe contener solo números si está presente.',
+    }),
   situacionEconomica: z.enum(['Pobre', 'Extremo Pobre'], { message: 'La situación económica es requerida.' }),
-  direccionDNI: z.string().min(1, { message: 'La dirección DNI es requerida.' }).max(255, { message: 'La dirección DNI es demasiado larga.' }), // Made required
-  regionDNI: z.string().min(1, { message: 'La región DNI es requerida.' }).max(255, { message: 'La región DNI es demasiado larga.' }), // Made required
-  provinciaDNI: z.string().min(1, { message: 'La provincia DNI es requerida.' }).max(255, { message: 'La provincia DNI es demasiado larga.' }), // Made required
-  distritoDNI: z.string().min(1, { message: 'El distrito DNI es requerido.' }).max(255, { message: 'El distrito DNI es demasiado larga.' }), // Made required
-  localidad: z.string().min(1, { message: 'La localidad es requerida.' }).max(255, { message: 'La localidad es demasiado larga.' }), // Moved from addressDataSchema and made required
+  direccionDNI: z.string().min(1, { message: 'La dirección DNI es requerida.' }).max(255, { message: 'La dirección DNI es demasiado larga.' }),
+  regionDNI: z.string().min(1, { message: 'La región DNI es requerida.' }).max(255, { message: 'La región DNI es demasiado larga.' }),
+  provinciaDNI: z.string().min(1, { message: 'La provincia DNI es requerida.' }).max(255, { message: 'La provincia DNI es demasiado larga.' }),
+  distritoDNI: z.string().min(1, { message: 'El distrito DNI es requerido.' }).max(255, { message: 'El distrito DNI es demasiado larga.' }),
+  localidad: z.string().min(1, { message: 'La localidad es requerida.' }).max(255, { message: 'La localidad es demasiado larga.' }),
 });
 
 const addressDataSchema = z.object({
@@ -53,7 +72,7 @@ const formSchema = z.intersection(personalDataSchema, addressDataSchema);
 type SocioTitularFormValues = z.infer<typeof formSchema>;
 
 interface SocioTitularRegistrationFormProps {
-  socioId?: string;
+  socioId?: number; // Cambiado a number | undefined
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -84,6 +103,12 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
   const [dataToConfirm, setDataToConfirm] = useState<SocioTitularFormValues | null>(null);
   const [isConfirmingSubmission, setIsConfirmingSubmission] = useState(false);
 
+  // State for locality auto-suggestion
+  const [localitiesSuggestions, setLocalitiesSuggestions] = useState<string[]>([]);
+  const [isLocalitiesLoading, setIsLocalitiesLoading] = useState(false);
+  const [openLocalitiesPopover, setOpenLocalitiesPopover] = useState(false);
+
+
   const form = useForm<SocioTitularFormValues>({
     resolver: zodResolver(formSchema),
     defaultValues: {
@@ -100,7 +125,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
       provinciaDNI: '',
       distritoDNI: '',
       localidad: '',
-      
+
       regionVivienda: '',
       provinciaVivienda: '',
       distritoVivienda: '',
@@ -113,6 +138,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
   const { handleSubmit, setValue, watch, reset, register, control, formState: { errors } } = form;
   const watchedDni = watch('dni');
   const watchedFechaNacimiento = watch('fechaNacimiento');
+  const watchedLocalidad = watch('localidad'); // Watch locality for filtering
 
   useEffect(() => {
     if (watchedFechaNacimiento) {
@@ -122,6 +148,29 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
       setValue('edad', null);
     }
   }, [watchedFechaNacimiento, setValue]);
+
+  // Fetch unique localities for auto-suggestion
+  const fetchUniqueLocalities = useCallback(async () => {
+    setIsLocalitiesLoading(true);
+    const { data, error } = await supabase
+      .from('socio_titulares')
+      .select('localidad')
+      .neq('localidad', '') // Exclude empty strings
+      .order('localidad', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching unique localities:', error.message);
+      toast.error('Error al cargar localidades', { description: error.message });
+    } else if (data) {
+      const uniqueLocalities = Array.from(new Set(data.map(item => item.localidad))).filter(Boolean) as string[];
+      setLocalitiesSuggestions(uniqueLocalities);
+    }
+    setIsLocalitiesLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchUniqueLocalities();
+  }, [fetchUniqueLocalities]);
 
 
   const renderInputField = (
@@ -338,7 +387,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
 
   useEffect(() => {
     const fetchSocio = async () => {
-      if (socioId) {
+      if (socioId !== undefined) { // Check for undefined, not just truthiness
         const { data, error } = await supabase
           .from('socio_titulares')
           .select('*')
@@ -358,7 +407,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
             regionVivienda: data.regionVivienda || '',
             provinciaVivienda: data.provinciaVivienda || '',
             distritoVivienda: data.distritoVivienda || '',
-            localidad: data.localidad || '', // Mapped to new 'localidad' field
+            localidad: data.localidad || '',
             direccionDNI: data.direccionDNI || '',
             regionDNI: data.regionDNI || '',
             provinciaDNI: data.provinciaDNI || '',
@@ -381,7 +430,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
     setIsDniSearching(true);
     const { data, error } = await supabase
       .from('socio_titulares')
-      .select('nombres, apellidoPaterno, apellidoMaterno, fechaNacimiento, edad, celular, direccionDNI, regionDNI, provinciaDNI, distritoDNI, localidad') // Updated select fields
+      .select('nombres, apellidoPaterno, apellidoMaterno, fechaNacimiento, edad, celular, direccionDNI, regionDNI, provinciaDNI, distritoDNI, localidad')
       .eq('dni', dni)
       .single();
 
@@ -398,7 +447,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
       setValue('regionDNI', '');
       setValue('provinciaDNI', '');
       setValue('distritoDNI', '');
-      setValue('localidad', ''); // Clear new 'localidad' field
+      setValue('localidad', '');
     } else if (data) {
       setValue('nombres', data.nombres);
       setValue('apellidoPaterno', data.apellidoPaterno);
@@ -410,7 +459,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
       setValue('regionDNI', data.regionDNI);
       setValue('provinciaDNI', data.provinciaDNI);
       setValue('distritoDNI', data.distritoDNI);
-      setValue('localidad', data.localidad); // Set new 'localidad' field
+      setValue('localidad', data.localidad);
       toast.success('Socio encontrado en la base de datos', { description: `Nombre: ${data.nombres} ${data.apellidoPaterno}` });
     } else {
       setValue('nombres', '');
@@ -423,14 +472,14 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
       setValue('regionDNI', '');
       setValue('provinciaDNI', '');
       setValue('distritoDNI', '');
-      setValue('localidad', ''); // Clear new 'localidad' field
+      setValue('localidad', '');
       toast.warning('DNI no encontrado en la base de datos', { description: 'No se encontró un socio con este DNI. Puedes consultar Reniec.' });
     }
     setIsDniSearching(false);
   }, [setValue]);
 
   useEffect(() => {
-    if (socioId && watchedDni) {
+    if (socioId !== undefined && watchedDni) { // Check for undefined
       searchSocioByDni(watchedDni);
     }
   }, [socioId, watchedDni, searchSocioByDni]);
@@ -456,7 +505,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
         ...dataToConfirm,
       };
 
-      if (socioId) {
+      if (socioId !== undefined) { // Check for undefined
         const { error } = await supabase
           .from('socio_titulares')
           .update(dataToSave)
@@ -473,8 +522,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
 
         if (error) throw error;
         toast.success('Socio registrado', { description: 'El nuevo socio titular ha sido registrado exitosamente.' });
-        onSuccess();
-        
+
         reset({
           dni: '',
           nombres: '',
@@ -585,7 +633,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                             <Button
                               variant={"outline"}
                               className={cn(
-                                "col-span-3 w-full justify-start text-left font-normal rounded-lg border-border bg-background text-foreground focus:ring-success focus:border-success transition-all duration-300",
+                                "col-span-3 w-full justify-start text-left font-normal rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300",
                                 !field.value && "text-muted-foreground",
                                 "hover:bg-success/10 hover:text-success"
                               )}
@@ -613,7 +661,75 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                   )}
                 />
                 {renderInputField('edad', 'Edad', 'Ej: 35', 'number', true)}
-                {renderInputField('localidad', 'Localidad', 'Ej: San Juan', 'text', isReniecSearching)}
+
+                {/* Localidad with auto-suggestion and new entry capability */}
+                <FormField
+                  control={form.control}
+                  name="localidad"
+                  render={({ field }) => (
+                    <FormItem className="grid grid-cols-4 items-center gap-4">
+                      <FormLabel className="text-right text-textSecondary">Localidad</FormLabel>
+                      <Popover open={openLocalitiesPopover} onOpenChange={setOpenLocalitiesPopover}>
+                        <PopoverTrigger asChild>
+                          <FormControl>
+                            <Button
+                              variant="outline"
+                              role="combobox"
+                              aria-expanded={openLocalitiesPopover}
+                              className="col-span-3 w-full justify-between rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+                              disabled={isReniecSearching || isLocalitiesLoading}
+                            >
+                              {field.value
+                                ? field.value // Display the current value, whether selected or typed
+                                : "Selecciona o escribe una localidad..."}
+                              <Loader2 className={cn("ml-2 h-4 w-4 shrink-0 opacity-0", isLocalitiesLoading && "animate-spin opacity-100")} />
+                            </Button>
+                          </FormControl>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[--radix-popover-trigger-width] p-0 bg-card border-border rounded-xl shadow-lg">
+                          <Command>
+                            <CommandInput
+                              placeholder="Buscar localidad..."
+                              className="h-9"
+                              value={field.value} // Bind CommandInput value to form field value
+                              onValueChange={(search) => {
+                                field.onChange(search); // Update form field value as user types
+                              }}
+                            />
+                            <CommandList>
+                              <CommandEmpty>No se encontró localidad.</CommandEmpty>
+                              <CommandGroup>
+                                {localitiesSuggestions
+                                  .filter(loc => loc.toLowerCase().includes(watchedLocalidad.toLowerCase()))
+                                  .map((loc) => (
+                                    <CommandItem
+                                      value={loc}
+                                      key={loc}
+                                      onSelect={(currentValue) => {
+                                        field.onChange(currentValue); // Set the selected value
+                                        setOpenLocalitiesPopover(false);
+                                      }}
+                                      className="cursor-pointer hover:bg-muted/50"
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          field.value === loc ? "opacity-100" : "opacity-0"
+                                        )}
+                                      />
+                                      {loc}
+                                    </CommandItem>
+                                  ))}
+                              </CommandGroup>
+                            </CommandList>
+                          </Command>
+                        </PopoverContent>
+                      </Popover>
+                      <FormMessage className="col-span-4 text-right" />
+                    </FormItem>
+                  )}
+                />
+
                 {renderTextareaField('direccionDNI', 'Dirección DNI', 'Ej: Av. Los Girasoles 123', isReniecSearching, isReniecSearching)}
                 {renderInputField('regionDNI', 'Región DNI', 'Ej: Lima', 'text', isReniecSearching)}
                 {renderInputField('provinciaDNI', 'Provincia DNI', 'Ej: Lima', 'text', isReniecSearching)}
@@ -650,7 +766,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
               Cancelar
             </Button>
             <Button type="submit" className="rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
-              {socioId ? 'Guardar Cambios' : 'Registrar Socio Titular'}
+              {socioId !== undefined ? 'Guardar Cambios' : 'Registrar Socio Titular'}
             </Button>
           </DialogFooter>
         </form>
@@ -660,10 +776,10 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
         isOpen={isConfirmDialogOpen}
         onClose={handleCloseConfirmationOnly}
         onConfirm={handleConfirmSubmit}
-        title={socioId ? 'Confirmar Edición de Socio' : 'Confirmar Registro de Socio'}
+        title={socioId !== undefined ? 'Confirmar Edición de Socio' : 'Confirmar Registro de Socio'}
         description="Por favor, revisa los detalles del socio antes de confirmar."
         data={dataToConfirm || {}}
-        confirmButtonText={socioId ? 'Confirmar Actualización' : 'Confirmar Registro'}
+        confirmButtonText={socioId !== undefined ? 'Confirmar Actualización' : 'Confirmar Registro'}
         isConfirming={isConfirmingSubmission}
       />
     </FormProvider>

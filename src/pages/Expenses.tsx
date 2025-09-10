@@ -1,8 +1,8 @@
-import { useState } from 'react';
-import { ColumnDef } from '@tanstack/react-table';
+import { useState, useEffect, useCallback } from 'react';
+import { ColumnDef, Row } from '@tanstack/react-table'; // Import Row type
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PlusCircle, Edit, ArrowUpDown, CalendarIcon } from 'lucide-react';
+import { PlusCircle, Edit, ArrowUpDown, CalendarIcon, XCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui-custom/DataTable';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -41,7 +41,7 @@ const expenseFormSchema = z.object({
   account: z.string().min(1, { message: 'La cuenta es requerida.' }),
   date: z.string().min(1, { message: 'La fecha es requerida.' }),
   category: z.string().min(1, { message: 'La categoría es requerida.' }),
-  sub_category: z.string().optional().nullable(), // Subcategory is optional and nullable
+  subcategory: z.string().optional().nullable(), // Corregido a subcategory
   description: z.string().min(1, { message: 'La descripción es requerida.' }).max(255, { message: 'La descripción es demasiado larga.' }),
   numero_gasto: z.string().optional().nullable(),
   colaborador_id: z.string().uuid().optional().nullable(),
@@ -56,7 +56,7 @@ type ExpenseFormInputValues = {
   account: string;
   date: string;
   category: string;
-  sub_category: string | null;
+  subcategory: string | null; // Corregido a subcategory
   description: string;
   numero_gasto: string | null;
   colaborador_id: string | null;
@@ -104,12 +104,12 @@ const expenseColumns: ColumnDef<GastoType>[] = [
     cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('category')}</span>,
   },
   {
-    accessorKey: 'sub_category',
+    accessorKey: 'subcategory', // Corregido a subcategory
     header: 'Subcategoría',
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('sub_category') || 'N/A'}</span>,
+    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('subcategory') || 'N/A'}</span>,
   },
   {
-    accessorKey: 'account',
+    accessorKey: 'account', // Añadido account como accessorKey
     header: 'Cuenta',
     cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('account')}</span>,
   },
@@ -189,12 +189,28 @@ const generateNextNumeroGasto = (expenses: GastoType[]): string => {
 
 
 function Expenses() {
-  const { data: expenseData, loading, error, addRecord, updateRecord, deleteRecord, refreshData } = useSupabaseData<GastoType>({ tableName: 'gastos' });
+  const {
+    data: expenseData,
+    loading,
+    error,
+    addRecord,
+    updateRecord,
+    deleteRecord,
+    refreshData,
+    setFilters,
+  } = useSupabaseData<GastoType>({
+    tableName: 'gastos',
+    initialSort: { column: 'date', ascending: false },
+  });
   const { data: colaboradoresData } = useSupabaseData<Colaborador>({ tableName: 'colaboradores', enabled: true });
   const { data: accountsData, loading: accountsLoading, error: accountsError } = useSupabaseData<Cuenta>({ tableName: 'cuentas' });
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<GastoType | null>(null);
   const [globalFilter, setGlobalFilter] = useState('');
+
+  // Estados para los filtros (solo fecha y colaborador)
+  const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
+  const [colaboradorFilter, setColaboradorFilter] = useState<string | null>(null);
 
   // State for confirmation dialog
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
@@ -202,24 +218,76 @@ function Expenses() {
   const [isConfirmingSubmission, setIsConfirmingSubmission] = useState(false);
 
 
-  const form = useForm<ExpenseFormInputValues>({ // Use ExpenseFormInputValues here
+  const form = useForm<ExpenseFormInputValues>({
     resolver: zodResolver(expenseFormSchema),
     defaultValues: {
-      amount: '', // This is now valid as amount is string in ExpenseFormInputValues
+      amount: '',
       account: '',
       date: format(new Date(), 'yyyy-MM-dd'),
       category: '',
-      sub_category: null,
+      subcategory: null, // Corregido a subcategory
       description: '',
       numero_gasto: null,
       colaborador_id: null,
     },
   });
 
-  const watchedCategory = form.watch('category'); // Watch the category field for dynamic subcategory rendering
+  const watchedCategory = form.watch('category');
 
   // Fetch accounts from Supabase
   const availableAccounts = accountsData.map(account => account.name);
+
+  // Efecto para aplicar los filtros a useSupabaseData (solo fecha y colaborador)
+  useEffect(() => {
+    const newFilters: Record<string, any> = {};
+    if (dateFilter) {
+      newFilters.date = format(dateFilter, 'yyyy-MM-dd');
+    }
+    if (colaboradorFilter) {
+      newFilters.colaborador_id = colaboradorFilter;
+    }
+    setFilters(newFilters);
+  }, [dateFilter, colaboradorFilter, setFilters]);
+
+  // Función para limpiar todos los filtros y la búsqueda global
+  const clearAllFilters = () => {
+    setDateFilter(undefined);
+    setColaboradorFilter(null);
+    setGlobalFilter(''); // Limpiar el filtro global de la tabla
+  };
+
+  // Función de filtro global personalizada para gastos
+  const expenseGlobalFilterFn = useCallback((row: Row<GastoType>, _columnId: string, filterValue: string) => { // Eliminado columnId no utilizado
+    const search = filterValue.toLowerCase();
+    const original = row.original;
+
+    // Buscar en categoría
+    const category = original.category?.toLowerCase();
+    if (category && category.includes(search)) {
+      return true;
+    }
+
+    // Buscar en número de gasto
+    const numeroGasto = original.numero_gasto?.toLowerCase();
+    if (numeroGasto && numeroGasto.includes(search)) {
+      return true;
+    }
+
+    // Buscar en subcategoría
+    const subcategory = original.subcategory?.toLowerCase(); // Corregido a subcategory
+    if (subcategory && subcategory.includes(search)) {
+      return true;
+    }
+
+    // Buscar en descripción
+    const description = original.description?.toLowerCase();
+    if (description && description.includes(search)) {
+      return true;
+    }
+
+    return false;
+  }, []);
+
 
   // Function to close *only* the confirmation dialog
   const handleCloseConfirmationOnly = () => {
@@ -232,26 +300,25 @@ function Expenses() {
     setEditingExpense(expense || null);
     if (expense) {
       form.reset({
-        amount: expense.amount.toString(), // Convert number to string for form input
-        account: expense.account || '',
+        amount: expense.amount.toString(),
+        account: expense.account || '', // Corregido a expense.account
         date: expense.date,
         category: expense.category || '',
-        sub_category: expense.sub_category || null, // Ensure it's null if not present
+        subcategory: expense.subcategory || null, // Corregido a subcategory
         description: expense.description || '',
         numero_gasto: expense.numero_gasto || null,
         colaborador_id: expense.colaborador_id || null,
       });
     } else {
-      // For new expenses, generate the next numero_gasto
       const nextNumeroGasto = generateNextNumeroGasto(expenseData);
       form.reset({
-        amount: '', // This is now valid
+        amount: '',
         account: '',
         date: format(new Date(), 'yyyy-MM-dd'),
-        category: '', // Default to empty
-        sub_category: null, // Default to null
+        category: '',
+        subcategory: null, // Corregido a subcategory
         description: '',
-        numero_gasto: nextNumeroGasto, // Set the auto-generated number
+        numero_gasto: nextNumeroGasto,
         colaborador_id: null,
       });
     }
@@ -265,63 +332,58 @@ function Expenses() {
     handleCloseConfirmationOnly();
   };
 
-  // Modified onSubmit to open confirmation dialog
-  // Change 'values' type to ExpenseFormInputValues
   const onSubmit = async (inputValues: ExpenseFormInputValues, event?: React.BaseSyntheticEvent) => {
     event?.preventDefault();
-
-    // Manually parse the input values to get the validated and transformed data
-    // This step ensures 'amount' is converted to a number as per expenseFormSchema
     const parsedValues: ExpenseFormValues = expenseFormSchema.parse(inputValues);
-
-    setDataToConfirm(parsedValues); // dataToConfirm is ExpenseFormValues | null
+    setDataToConfirm(parsedValues);
     setIsConfirmDialogOpen(true);
   };
 
-  // Function to handle actual submission after confirmation
   const handleConfirmSubmit = async () => {
-    if (!dataToConfirm) return; // dataToConfirm is already ExpenseFormValues
+    if (!dataToConfirm) return;
 
     setIsConfirmingSubmission(true);
     try {
       if (editingExpense) {
-        await updateRecord(editingExpense.id, dataToConfirm);
+        // Ensure numero_gasto is explicitly string | null for updateRecord
+        const dataToUpdate = {
+          ...dataToConfirm,
+          numero_gasto: dataToConfirm.numero_gasto === undefined ? null : dataToConfirm.numero_gasto,
+        };
+        await updateRecord(editingExpense.id, dataToUpdate);
         toast.success('Gasto actualizado', { description: 'El gasto ha sido actualizado exitosamente.' });
         handleCloseDialog();
       } else {
-        // Add the new record and get the returned object
-        const newRecord = await addRecord(dataToConfirm);
+        // Ensure numero_gasto is explicitly string | null for addRecord
+        const dataToAdd = {
+          ...dataToConfirm,
+          numero_gasto: dataToConfirm.numero_gasto === undefined ? null : dataToConfirm.numero_gasto,
+        };
+        const newRecord = await addRecord(dataToAdd);
         toast.success('Gasto añadido', { description: 'El nuevo gasto ha sido registrado exitosamente.' });
         
         let nextNumeroGastoForForm: string | null = null;
         if (newRecord && newRecord.numero_gasto) {
-          // Calculate the next number based on the just-added record's number
           const numPart = parseInt(newRecord.numero_gasto.substring(2), 10);
           if (!isNaN(numPart)) {
             nextNumeroGastoForForm = `GA${String(numPart + 1).padStart(3, '0')}`;
           }
         } else {
-          // Fallback: if newRecord or its numero_gasto is missing,
-          // regenerate based on the current (potentially stale) expenseData.
-          // This should ideally not happen if addRecord is successful.
           nextNumeroGastoForForm = generateNextNumeroGasto(expenseData);
         }
 
-        // Reset form with the newly calculated next numero_gasto
         form.reset({
-          amount: '', // This is now valid
+          amount: '',
           account: '',
           date: format(new Date(), 'yyyy-MM-dd'),
           category: '',
-          sub_category: null,
+          subcategory: null, // Corregido a subcategory
           description: '',
-          numero_gasto: nextNumeroGastoForForm, // Set the new auto-generated number
+          numero_gasto: nextNumeroGastoForForm,
           colaborador_id: null,
         });
         setEditingExpense(null);
         handleCloseConfirmationOnly();
-
-        // Refresh data to ensure the table is updated with the new entry
         await refreshData();
       }
     } catch (submitError: any) {
@@ -332,14 +394,13 @@ function Expenses() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = async (id: number) => { // Cambiado a number para coincidir con el tipo de Gasto
     if (window.confirm('¿Estás seguro de que quieres eliminar este gasto?')) {
       await deleteRecord(id);
       toast.success('Gasto eliminado', { description: 'El gasto ha sido eliminado exitosamente.' });
     }
   };
 
-  // Update column actions to use the new handlers
   const columnsWithActions: ColumnDef<GastoType>[] = expenseColumns.map(col => {
     if (col.id === 'actions') {
       return {
@@ -385,17 +446,86 @@ function Expenses() {
   return (
     <div className="space-y-8">
       <Card className="rounded-xl border-border shadow-lg animate-fade-in">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-foreground">Gestión de Gastos</CardTitle>
-            <CardDescription className="text-muted-foreground">
-              Visualiza, busca y gestiona tus gastos.
-            </CardDescription>
+        <CardHeader className="flex flex-col space-y-4">
+          <div className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-foreground">Gestión de Gastos</CardTitle>
+              <CardDescription className="text-muted-foreground">
+                Visualiza, busca y gestiona tus gastos.
+              </CardDescription>
+            </div>
+            <Button onClick={() => handleOpenDialog()} className="flex items-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
+              <PlusCircle className="h-4 w-4" />
+              Añadir Gasto
+            </Button>
           </div>
-          <Button onClick={() => handleOpenDialog()} className="flex items-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
-            <PlusCircle className="h-4 w-4" />
-            Añadir Gasto
-          </Button>
+
+          {/* Filter Section */}
+          <div className="flex flex-wrap items-center gap-4 pt-4 border-t border-border mt-4">
+            {/* Date Filter */}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="filter-date" className="text-textSecondary">Fecha:</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant={"outline"}
+                    className={cn(
+                      "w-[180px] justify-start text-left font-normal rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300",
+                      !dateFilter && "text-muted-foreground"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {dateFilter ? format(dateFilter, "PPP", { locale: es }) : <span>Selecciona una fecha</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0 bg-card border-border rounded-xl shadow-lg" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={dateFilter}
+                    onSelect={setDateFilter}
+                    initialFocus
+                    locale={es}
+                    toDate={new Date()}
+                  />
+                </PopoverContent>
+              </Popover>
+              {dateFilter && (
+                <Button variant="ghost" size="icon" onClick={() => setDateFilter(undefined)} className="h-8 w-8 text-muted-foreground hover:text-destructive">
+                  <XCircle className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
+
+            {/* Collaborator Filter */}
+            <div className="flex items-center gap-2">
+              <Label htmlFor="filter-colaborador" className="text-textSecondary">Colaborador:</Label>
+              <Select onValueChange={(value) => setColaboradorFilter(value === 'all' ? null : value)} value={colaboradorFilter || 'all'}>
+                <SelectTrigger id="filter-colaborador" className="w-[200px] rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
+                  <SelectValue placeholder="Todos los colaboradores" />
+                </SelectTrigger>
+                <SelectContent className="bg-card border-border rounded-lg shadow-lg">
+                  <SelectItem value="all" className="hover:bg-muted/50 cursor-pointer">Todos los colaboradores</SelectItem>
+                  {colaboradoresData.map(colaborador => (
+                    <SelectItem key={colaborador.id} value={colaborador.id} className="hover:bg-muted/50 cursor-pointer">
+                      {colaborador.name} {colaborador.apellidos}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Clear Filters Button */}
+            {(dateFilter || colaboradorFilter || globalFilter) && (
+              <Button
+                variant="outline"
+                onClick={clearAllFilters}
+                className="flex items-center gap-2 rounded-lg border-border bg-background text-foreground hover:bg-muted/50 transition-all duration-300"
+              >
+                <XCircle className="h-4 w-4" />
+                Limpiar Filtros
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           <DataTable
@@ -403,7 +533,8 @@ function Expenses() {
             data={expenseData}
             globalFilter={globalFilter}
             setGlobalFilter={setGlobalFilter}
-            filterPlaceholder="Buscar gastos por descripción..."
+            filterPlaceholder="Buscar por categoría, número de gasto, subcategoría o descripción..."
+            customGlobalFilterFn={expenseGlobalFilterFn} // Pasar la función de filtro global personalizada
           />
         </CardContent>
       </Card>
@@ -460,7 +591,7 @@ function Expenses() {
                 </Label>
                 <Select onValueChange={(value) => {
                   form.setValue('category', value);
-                  form.setValue('sub_category', null); // Reset sub_category when category changes
+                  form.setValue('subcategory', null); // Corregido a subcategory
                 }} value={form.watch('category')}>
                   <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
                     <SelectValue placeholder="Selecciona una categoría" />
@@ -476,13 +607,12 @@ function Expenses() {
                 {form.formState.errors.category && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.category.message}</p>}
               </div>
 
-              {/* Conditional Subcategory Select */}
               {watchedCategory && (watchedCategory === 'Gasto Fijo' || watchedCategory === 'Viáticos') && (
                 <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="sub_category" className="text-right text-textSecondary">
+                  <Label htmlFor="subcategory" className="text-right text-textSecondary"> {/* Corregido a subcategory */}
                     Subcategoría
                   </Label>
-                  <Select onValueChange={(value) => form.setValue('sub_category', value)} value={form.watch('sub_category') || ''}>
+                  <Select onValueChange={(value) => form.setValue('subcategory', value)} value={form.watch('subcategory') || ''}> {/* Corregido a subcategory */}
                     <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
                       <SelectValue placeholder="Selecciona una subcategoría" />
                     </SelectTrigger>
@@ -499,7 +629,7 @@ function Expenses() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {form.formState.errors.sub_category && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.sub_category.message}</p>}
+                  {form.formState.errors.subcategory && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.subcategory.message}</p>} {/* Corregido a subcategory */}
                 </div>
               )}
 
@@ -522,7 +652,7 @@ function Expenses() {
                   id="numero_gasto"
                   {...form.register('numero_gasto')}
                   className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-                  readOnly // Make the field read-only
+                  readOnly
                 />
                 {form.formState.errors.numero_gasto && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.numero_gasto.message}</p>}
               </div>
@@ -574,7 +704,7 @@ function Expenses() {
                           }}
                           initialFocus
                           locale={es}
-                          toDate={new Date()} // Restrict to today
+                          toDate={new Date()}
                         />
                       </PopoverContent>
                     </Popover>

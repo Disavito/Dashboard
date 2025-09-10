@@ -23,7 +23,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { FormField, FormItem, FormLabel, FormControl, FormMessage, Form } from '@/components/ui/form';
 import ConfirmationDialog from '@/components/ui-custom/ConfirmationDialog';
-
+import { Checkbox } from '@/components/ui/checkbox'; // Import Checkbox
 
 // --- Form Schema for Ingreso ---
 const incomeFormSchema = z.object({
@@ -42,19 +42,29 @@ const incomeFormSchema = z.object({
   ),
   account: z.string().min(1, { message: 'La cuenta es requerida.' }),
   date: z.string().min(1, { message: 'La fecha es requerida.' }),
-  transaction_type: z.enum(['Ingreso', 'Anulacion', 'Devolucion'], { message: 'Tipo de transacción inválido.' }), // Made required
+  transaction_type: z.enum(['Ingreso', 'Anulacion', 'Devolucion'], { message: 'Tipo de transacción inválido.' }),
+  numeroOperacion: z.string().optional().nullable(), // Campo corregido: numeroOperacion
+  allow_duplicate_numero_operacion: z.boolean().optional().default(false), // NEW FIELD for UI control
 })
 .refine((data) => {
   // For 'Ingreso', amount must be strictly positive
   if (data.transaction_type === 'Ingreso' && data.amount <= 0) {
     return false;
   }
-  // For 'Anulacion' and 'Devolucion', amount can be 0 or negative, which will be adjusted by transform.
-  // No specific positive check here.
   return true;
 }, {
   message: 'El monto para un ingreso debe ser positivo.',
   path: ['amount'],
+})
+.refine((data) => {
+  // Conditional requirement for numeroOperacion
+  if (['BBVA Empresa', 'Cuenta Fidel'].includes(data.account) && !data.numeroOperacion) {
+    return false; // Required if account is BBVA Empresa or Cuenta Fidel and numeroOperacion is empty
+  }
+  return true;
+}, {
+  message: 'El número de operación es requerido para la cuenta seleccionada.',
+  path: ['numeroOperacion'],
 })
 .transform((data) => {
   let transformedAmount = data.amount;
@@ -66,6 +76,10 @@ const incomeFormSchema = z.object({
   return {
     ...data,
     amount: transformedAmount,
+    // Ensure numeroOperacion is null if not provided and not required
+    numeroOperacion: (['BBVA Empresa', 'Cuenta Fidel'].includes(data.account) && data.numeroOperacion)
+      ? data.numeroOperacion
+      : null,
   };
 });
 
@@ -80,7 +94,9 @@ type IncomeFormInputValues = {
   amount: string; // Input field will hold a string
   account: string;
   date: string;
-  transaction_type: 'Ingreso' | 'Anulacion' | 'Devolucion'; // Made required
+  transaction_type: 'Ingreso' | 'Anulacion' | 'Devolucion';
+  numeroOperacion: string; // Campo corregido
+  allow_duplicate_numero_operacion: boolean; // NEW FIELD
 };
 
 
@@ -121,6 +137,11 @@ const incomeColumns: ColumnDef<IngresoType>[] = [
     cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('account')}</span>,
   },
   {
+    accessorKey: 'numeroOperacion', // Campo corregido en la tabla
+    header: 'Nº Operación',
+    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('numeroOperacion') || '-'}</span>,
+  },
+  {
     accessorKey: 'transaction_type',
     header: ({ column }) => (
       <Button
@@ -139,7 +160,7 @@ const incomeColumns: ColumnDef<IngresoType>[] = [
     header: () => <div className="text-right">Monto</div>,
     cell: ({ row }) => {
       const amount = parseFloat(row.getValue('amount'));
-      const formattedAmount = new Intl.NumberFormat('es-PE', { // Changed to es-PE and PEN
+      const formattedAmount = new Intl.NumberFormat('es-PE', {
         style: 'currency',
         currency: 'PEN',
       }).format(amount);
@@ -150,13 +171,12 @@ const incomeColumns: ColumnDef<IngresoType>[] = [
     id: 'actions',
     enableHiding: false,
     cell: () => {
-      // Actions will be defined dynamically inside the component
       return null;
     },
   },
 ];
 
-const transactionTypes = ['Ingreso', 'Anulacion', 'Devolucion']; // Restricted transaction types
+const transactionTypes = ['Ingreso', 'Anulacion', 'Devolucion'];
 
 function Income() {
   const { data: incomeData, loading, error, addRecord, updateRecord, deleteRecord } = useSupabaseData<IngresoType>({ tableName: 'ingresos' });
@@ -166,29 +186,33 @@ function Income() {
   const [editingIncome, setEditingIncome] = useState<IngresoType | null>(null);
   const [globalFilter, setGlobalFilter] = useState('');
   const [isDniSearching, setIsDniSearching] = useState(false);
+  const [isDuplicateNumeroOperacionDetected, setIsDuplicateNumeroOperacionDetected] = useState(false); // NEW state for checkbox activation
 
-  // State for confirmation dialog
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
-  const [dataToConfirm, setDataToConfirm] = useState<IncomeFormValues | null>(null);
+  const [dataToConfirm, setDataToConfirm] = useState<Omit<IncomeFormValues, 'allow_duplicate_numero_operacion'> | null>(null); // Omit the UI flag
   const [isConfirmingSubmission, setIsConfirmingSubmission] = useState(false);
 
 
-  const form = useForm<IncomeFormInputValues>({ // Use IncomeFormInputValues here
+  const form = useForm<IncomeFormInputValues>({
     resolver: zodResolver(incomeFormSchema),
     defaultValues: {
       receipt_number: '',
       dni: '',
       full_name: '',
-      amount: '', // Changed default to empty string, now valid with IncomeFormInputValues
+      amount: '',
       account: '',
-      date: format(new Date(), 'yyyy-MM-dd'), // Default to today's date
-      transaction_type: 'Ingreso', // Default to 'Ingreso'
+      date: format(new Date(), 'yyyy-MM-dd'),
+      transaction_type: 'Ingreso',
+      numeroOperacion: '', // Campo corregido
+      allow_duplicate_numero_operacion: false, // NEW: Default to false
     },
   });
 
   const { handleSubmit, register, setValue, watch, formState: { errors } } = form;
   const watchedDni = watch('dni');
-  const watchedTransactionType = watch('transaction_type'); // Watch transaction type
+  const watchedTransactionType = watch('transaction_type');
+  const watchedAccount = watch('account'); // Observar el campo de cuenta
+  const watchedNumeroOperacion = watch('numeroOperacion'); // Watch numeroOperacion for conditional checkbox
 
   // Fetch accounts from Supabase
   const availableAccounts = accountsData.map(account => account.name);
@@ -232,11 +256,8 @@ function Income() {
     if (watchedTransactionType === 'Anulacion') {
       setValue('amount', '0', { shouldValidate: true });
     }
-    // No specific action for 'Devolucion' here, as the transform handles the negation.
-    // User can input a positive number, and it will be stored as negative.
   }, [watchedTransactionType, setValue]);
 
-  // NEW: Function to close *only* the confirmation dialog
   const handleCloseConfirmationOnly = () => {
     setIsConfirmDialogOpen(false);
     setDataToConfirm(null);
@@ -245,25 +266,30 @@ function Income() {
 
   const handleOpenDialog = (income?: IngresoType) => {
     setEditingIncome(income || null);
+    setIsDuplicateNumeroOperacionDetected(false); // Reset checkbox activation state
     if (income) {
       form.reset({
         receipt_number: income.receipt_number || '',
         dni: income.dni || '',
         full_name: income.full_name || '',
-        amount: Math.abs(income.amount).toString(), // Display absolute value for 'Devolucion' in edit mode
+        amount: Math.abs(income.amount).toString(),
         account: income.account || '',
         date: income.date,
-        transaction_type: income.transaction_type as IncomeFormInputValues['transaction_type'] || 'Ingreso', // Default to 'Ingreso' if undefined
+        transaction_type: income.transaction_type as IncomeFormInputValues['transaction_type'] || 'Ingreso',
+        numeroOperacion: income.numeroOperacion || '', // Campo corregido
+        allow_duplicate_numero_operacion: false, // Reset checkbox on edit
       });
     } else {
       form.reset({
         receipt_number: '',
         dni: '',
         full_name: '',
-        amount: '', // Changed default to empty string
+        amount: '',
         account: '',
-        date: format(new Date(), 'yyyy-MM-dd'), // Default to today's date
-        transaction_type: 'Ingreso', // Default to 'Ingreso'
+        date: format(new Date(), 'yyyy-MM-dd'),
+        transaction_type: 'Ingreso',
+        numeroOperacion: '', // Campo corregido
+        allow_duplicate_numero_operacion: false, // Reset checkbox on new
       });
     }
     setIsDialogOpen(true);
@@ -272,49 +298,99 @@ function Income() {
   const handleCloseDialog = () => {
     setIsDialogOpen(false);
     setEditingIncome(null);
-    form.reset(); // Clears form fields
-    handleCloseConfirmationOnly(); // Also ensure confirmation dialog is closed and data cleared
+    setIsDuplicateNumeroOperacionDetected(false); // Reset checkbox activation state
+    form.reset({
+      receipt_number: '',
+      dni: '',
+      full_name: '',
+      amount: '',
+      account: '',
+      date: format(new Date(), 'yyyy-MM-dd'),
+      transaction_type: 'Ingreso',
+      numeroOperacion: '', // Campo corregido
+      allow_duplicate_numero_operacion: false, // Ensure checkbox is reset
+    });
+    handleCloseConfirmationOnly();
   };
 
-  // Modified onSubmit to open confirmation dialog
-  // Change 'values' type to IncomeFormInputValues
   const onSubmit = async (inputValues: IncomeFormInputValues, event?: React.BaseSyntheticEvent) => {
     event?.preventDefault();
 
-    // Manually parse the input values to get the validated and transformed data
-    // This step ensures 'amount' is converted to a number as per incomeFormSchema
+    // Clear previous numeroOperacion errors and reset duplicate detection state
+    form.clearErrors('numeroOperacion');
+    setIsDuplicateNumeroOperacionDetected(false);
+
+    // First, parse with Zod to get client-side validation (excluding async uniqueness)
+    // This will also apply the transform for numeroOperacion to null if not required/provided
     const parsedValues: IncomeFormValues = incomeFormSchema.parse(inputValues);
 
-    setDataToConfirm(parsedValues); // dataToConfirm is IncomeFormValues | null
+    // Perform async uniqueness check for numeroOperacion if applicable
+    // Only check if numeroOperacion has a value AND duplication is NOT allowed
+    if (parsedValues.numeroOperacion && !parsedValues.allow_duplicate_numero_operacion) {
+      let query = supabase
+        .from('ingresos')
+        .select('id')
+        .eq('numeroOperacion', parsedValues.numeroOperacion); // Campo corregido
+
+      // If editing, exclude the current income's ID from the uniqueness check
+      if (editingIncome) {
+        query = query.neq('id', editingIncome.id);
+      }
+
+      const { data: existingIncomes, error: supabaseError } = await query;
+
+      if (supabaseError) {
+        console.error('Error checking numeroOperacion uniqueness:', supabaseError.message);
+        toast.error('Error de validación', { description: 'No se pudo verificar la unicidad del número de operación.' });
+        return; // Stop submission
+      }
+
+      if (existingIncomes && existingIncomes.length > 0) {
+        form.setError('numeroOperacion', { // Campo corregido
+          type: 'manual',
+          message: 'El número de operación ya existe. Marque "Permitir duplicado" si es intencional.',
+        });
+        setIsDuplicateNumeroOperacionDetected(true); // Enable the checkbox
+        toast.error('Error de validación', { description: 'El número de operación ya existe.' });
+        return; // Stop submission
+      }
+    }
+
+    // If all checks pass, proceed to confirmation
+    // Omit allow_duplicate_numero_operacion before passing to confirmation dialog
+    const { allow_duplicate_numero_operacion, ...dataToConfirmWithoutFlag } = parsedValues;
+    setDataToConfirm(dataToConfirmWithoutFlag); // Pass data without the flag to the confirmation dialog
     setIsConfirmDialogOpen(true);
   };
 
-  // Function to handle actual submission after confirmation
   const handleConfirmSubmit = async () => {
     if (!dataToConfirm) return;
 
     setIsConfirmingSubmission(true);
     try {
       if (editingIncome) {
+        // dataToConfirm already excludes allow_duplicate_numero_operacion
         await updateRecord(editingIncome.id, dataToConfirm);
         toast.success('Ingreso actualizado', { description: 'El ingreso ha sido actualizado exitosamente.' });
-        handleCloseDialog(); // Close main dialog for edits
+        handleCloseDialog();
       } else {
+        // dataToConfirm already excludes allow_duplicate_numero_operacion
         await addRecord(dataToConfirm);
         toast.success('Ingreso añadido', { description: 'El nuevo ingreso ha sido registrado exitosamente.' });
-        
-        // For new entries: reset form, close confirmation dialog, but keep main dialog open
+
         form.reset({
           receipt_number: '',
           dni: '',
           full_name: '',
-          amount: '', // Reset to empty string
+          amount: '',
           account: '',
-          date: format(new Date(), 'yyyy-MM-dd'), // Reset date to today
-          transaction_type: 'Ingreso', // Reset to 'Ingreso'
+          date: format(new Date(), 'yyyy-MM-dd'),
+          transaction_type: 'Ingreso',
+          numeroOperacion: '', // Campo corregido
+          allow_duplicate_numero_operacion: false, // Reset the checkbox
         });
-        setEditingIncome(null); // Clear editing state
-        handleCloseConfirmationOnly(); // Close only the confirmation dialog
+        setEditingIncome(null);
+        handleCloseConfirmationOnly();
       }
     } catch (submitError: any) {
       console.error('Error al guardar el ingreso:', submitError.message);
@@ -331,7 +407,6 @@ function Income() {
     }
   };
 
-  // Update column actions to use the new handlers
   const columnsWithActions: ColumnDef<IngresoType>[] = incomeColumns.map(col => {
     if (col.id === 'actions') {
       return {
@@ -395,7 +470,7 @@ function Income() {
             data={incomeData}
             globalFilter={globalFilter}
             setGlobalFilter={setGlobalFilter}
-            filterPlaceholder="Buscar ingresos por nombre..."
+            filterPlaceholder="Buscar ingresos por nombre, DNI o número de recibo..."
           />
         </CardContent>
       </Card>
@@ -408,9 +483,8 @@ function Income() {
               {editingIncome ? 'Realiza cambios en el ingreso existente aquí.' : 'Añade un nuevo registro de ingreso a tu sistema.'}
             </DialogDescription>
           </DialogHeader>
-          {/* Wrap the form with the Form component */}
           <Form {...form}>
-            <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 py-4"> {/* Removed <IncomeFormValues> */}
+            <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4 py-4">
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="receipt_number" className="text-right text-textSecondary">
                   Nº Recibo
@@ -464,8 +538,8 @@ function Income() {
                   step="0.01"
                   {...register('amount')}
                   className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-                  placeholder="0.00" // Added placeholder
-                  readOnly={watchedTransactionType === 'Anulacion'} // Make read-only for 'Anulacion'
+                  placeholder="0.00"
+                  readOnly={watchedTransactionType === 'Anulacion'}
                 />
                 {errors.amount && <p className="col-span-4 text-right text-error text-sm">{errors.amount.message}</p>}
               </div>
@@ -491,6 +565,47 @@ function Income() {
                 </Select>
                 {errors.account && <p className="col-span-4 text-right text-error text-sm">{errors.account.message}</p>}
               </div>
+
+              {/* NEW: Numero de Operacion field - Conditionally rendered */}
+              {['BBVA Empresa', 'Cuenta Fidel'].includes(watchedAccount) && (
+                <div className="grid grid-cols-4 items-center gap-4 animate-fade-in">
+                  <Label htmlFor="numeroOperacion" className="text-right text-textSecondary">
+                    Nº Operación
+                  </Label>
+                  <Input
+                    id="numeroOperacion"
+                    {...register('numeroOperacion')}
+                    className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+                    placeholder="Ej: 1234567890"
+                  />
+                  {errors.numeroOperacion && <p className="col-span-4 text-right text-error text-sm">{errors.numeroOperacion.message}</p>}
+                </div>
+              )}
+
+              {/* NEW: Allow Duplicate Numero Operacion Checkbox - Conditionally rendered and activable */}
+              {['BBVA Empresa', 'Cuenta Fidel'].includes(watchedAccount) && watchedNumeroOperacion && (
+                <div className="grid grid-cols-4 items-center gap-4 animate-fade-in">
+                  <div className="col-start-2 col-span-3 flex items-center space-x-2">
+                    <Checkbox
+                      id="allow_duplicate_numero_operacion"
+                      checked={watch('allow_duplicate_numero_operacion')}
+                      onCheckedChange={(checked) => setValue('allow_duplicate_numero_operacion', checked as boolean)}
+                      disabled={!isDuplicateNumeroOperacionDetected} // Only activable if duplicate is detected
+                      className="border-border data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
+                    />
+                    <Label
+                      htmlFor="allow_duplicate_numero_operacion"
+                      className={cn(
+                        "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-textSecondary",
+                        isDuplicateNumeroOperacionDetected && "cursor-pointer" // Indicate it's clickable when enabled
+                      )}
+                    >
+                      Permitir duplicado de Nº Operación
+                    </Label>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-4 items-center gap-4">
                 <Label htmlFor="transaction_type" className="text-right text-textSecondary">
                   Tipo Transacción
@@ -539,7 +654,7 @@ function Income() {
                           }}
                           initialFocus
                           locale={es}
-                          toDate={new Date()} // Restrict to today
+                          toDate={new Date()}
                         />
                       </PopoverContent>
                     </Popover>
@@ -560,7 +675,6 @@ function Income() {
         </DialogContent>
       </Dialog>
 
-      {/* Confirmation Dialog */}
       <ConfirmationDialog
         isOpen={isConfirmDialogOpen}
         onClose={handleCloseConfirmationOnly}

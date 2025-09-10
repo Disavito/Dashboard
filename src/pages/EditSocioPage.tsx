@@ -1,6 +1,5 @@
 import { useParams } from 'react-router-dom';
 import SocioTitularRegistrationForm from '@/components/custom/SocioTitularRegistrationForm';
-// import { User } from 'lucide-react'; // Eliminado, no se usa directamente
 
 function EditSocioPage() {
   const { id } = useParams<{ id: string }>();
@@ -9,6 +8,18 @@ function EditSocioPage() {
     return (
       <div className="min-h-screen bg-background text-text font-sans flex items-center justify-center">
         <p className="text-destructive text-lg">Error: ID de socio no proporcionado para edición.</p>
+      </div>
+    );
+  }
+
+  // Convert the string ID from useParams to a number
+  const socioIdNumber = parseInt(id, 10);
+
+  // Check if the conversion resulted in a valid number
+  if (isNaN(socioIdNumber)) {
+    return (
+      <div className="min-h-screen bg-background text-text font-sans flex items-center justify-center">
+        <p className="text-destructive text-lg">Error: ID de socio inválido.</p>
       </div>
     );
   }
@@ -31,7 +42,7 @@ function EditSocioPage() {
         </div>
       </header>
       <main className="py-12">
-        <SocioTitularRegistrationForm socioId={id} onClose={() => {}} onSuccess={() => {}} />
+        <SocioTitularRegistrationForm socioId={socioIdNumber} onClose={() => {}} onSuccess={() => {}} />
       </main>
     </div>
   );

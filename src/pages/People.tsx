@@ -1,335 +1,291 @@
-import { useState, useMemo, useEffect } from 'react';
-import { ColumnDef, FilterFn } from '@tanstack/react-table';
-import { format, parseISO } from 'date-fns';
-import { es } from 'date-fns/locale';
-import { PlusCircle, Edit, ArrowUpDown } from 'lucide-react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
+import {
+  ColumnDef,
+  Row, // Import Row type from @tanstack/react-table
+} from '@tanstack/react-table';
+import { ArrowUpDown, PlusCircle, Loader2, Edit, Trash2, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { DataTable } from '@/components/ui-custom/DataTable';
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
-// import { Input } from '@/components/ui/input'; // Eliminado, no se usa directamente
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { useSupabaseData } from '@/hooks/useSupabaseData';
-import { SocioTitular as SocioTitularType, SituacionEconomica, Ingreso } from '@/lib/types';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
-import { cn } from '@/lib/utils';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import { toast } from 'sonner';
+import { supabase } from '@/lib/supabaseClient';
+import { SocioTitular } from '@/lib/types';
 import SocioTitularRegistrationForm from '@/components/custom/SocioTitularRegistrationForm';
-
-// --- Tipo extendido para incluir el estado de pago ---
-type SocioTitularWithPaymentStatus = SocioTitularType & {
-  paymentStatus: 'Pagado' | 'Exonerado' | 'No Pagado';
-};
-
-// --- Custom global filter function for SocioTitularWithPaymentStatus ---
-const socioTitularGlobalFilterFn: FilterFn<SocioTitularWithPaymentStatus> = (row, _columnId, filterValue) => {
-  const search = String(filterValue).toLowerCase().trim();
-  if (!search) return true; // If search is empty, show all rows
-
-  const searchTokens = search.split(/\s+/).filter(Boolean); // Split by spaces and remove empty strings
-  const originalRow = row.original;
-
-  const nombres = String(originalRow.nombres || '').toLowerCase();
-  const apellidoPaterno = String(originalRow.apellidoPaterno || '').toLowerCase();
-  const apellidoMaterno = String(originalRow.apellidoMaterno || '').toLowerCase();
-  const dni = String(originalRow.dni || '').toLowerCase();
-
-  // Check for DNI match first
-  if (dni.includes(search)) {
-    return true;
-  }
-
-  // Combine name fields for flexible search
-  const combinedName = `${nombres} ${apellidoPaterno} ${apellidoMaterno}`.toLowerCase();
-
-  // Check if all search tokens are present in the combined name
-  return searchTokens.every(token => combinedName.includes(token));
-};
-
-// --- Column Definitions ---
-const socioTitularBaseColumns: ColumnDef<SocioTitularWithPaymentStatus>[] = [
-  {
-    accessorKey: 'nombres',
-    header: ({ column }) => (
-      <Button
-        variant="ghost"
-        onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
-        className="px-0 hover:bg-transparent hover:text-accent"
-      >
-        Nombres
-        <ArrowUpDown className="ml-2 h-4 w-4" />
-      </Button>
-    ),
-    cell: ({ row }) => <span className="font-medium text-foreground">{row.getValue('nombres')}</span>,
-  },
-  {
-    accessorKey: 'apellidoPaterno',
-    header: 'Apellido Paterno',
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('apellidoPaterno')}</span>,
-  },
-  {
-    accessorKey: 'apellidoMaterno',
-    header: 'Apellido Materno',
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('apellidoMaterno')}</span>,
-  },
-  {
-    accessorKey: 'dni',
-    header: 'DNI',
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('dni') || 'N/A'}</span>,
-  },
-  {
-    accessorKey: 'celular',
-    header: 'Celular',
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('celular') || 'N/A'}</span>,
-  },
-  {
-    accessorKey: 'direccionVivienda',
-    header: 'Dirección Vivienda',
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('direccionVivienda') || 'N/A'}</span>,
-  },
-  {
-    accessorKey: 'localidad', // Añadir localidad para búsqueda
-    header: 'Localidad',
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('localidad') || 'N/A'}</span>,
-  },
-  {
-    accessorKey: 'situacionEconomica',
-    header: 'Situación Económica',
-    cell: ({ row }) => {
-      const situacion = row.getValue('situacionEconomica') as SituacionEconomica | null;
-      return (
-        <span className={cn(
-          "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-          situacion === 'Pobre' && 'bg-yellow-400/20 text-yellow-400',
-          situacion === 'Extremo Pobre' && 'bg-red-400/20 text-red-400',
-          !situacion && 'bg-gray-400/20 text-gray-400'
-        )}>
-          {situacion || 'No especificado'}
-        </span>
-      );
-    },
-  },
-  {
-    accessorKey: 'paymentStatus', // Nueva columna para el estado de pago
-    header: 'Estado de Pago',
-    cell: ({ row }) => {
-      const status = row.original.paymentStatus;
-      return (
-        <span className={cn(
-          "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium",
-          status === 'Pagado' && 'bg-green-400/20 text-green-400',
-          status === 'Exonerado' && 'bg-blue-400/20 text-blue-400',
-          status === 'No Pagado' && 'bg-red-400/20 text-red-400'
-        )}>
-          {status}
-        </span>
-      );
-    },
-  },
-  {
-    accessorKey: 'created_at',
-    header: 'Registrado',
-    cell: ({ row }) => {
-      const createdAt = row.getValue('created_at') as string | null;
-      return createdAt ? format(parseISO(createdAt), 'dd MMM yyyy', { locale: es }) : 'N/A';
-    },
-  },
-  {
-    id: 'actions',
-    enableHiding: false,
-    cell: () => {
-      // Actions will be defined dynamically inside the component
-      return null;
-    },
-  },
-];
+import ConfirmationDialog from '@/components/ui-custom/ConfirmationDialog';
+import { Link } from 'react-router-dom';
+import { DataTable } from '@/components/ui-custom/DataTable';
 
 function People() {
-  const [globalFilter, setGlobalFilter] = useState(''); // For DNI, names, surnames
-  const [selectedLocality, setSelectedLocality] = useState<string | null>(null); // For locality dropdown
+  const [socios, setSocios] = useState<SocioTitular[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isRegistrationDialogOpen, setIsRegistrationDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+  const [socioToDelete, setSocioToDelete] = useState<SocioTitular | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [globalFilter, setGlobalFilter] = useState('');
 
-  // Estado para el diálogo del formulario
-  const [isFormDialogOpen, setIsFormDialogOpen] = useState(false);
-  const [editingSocioId, setEditingSocioId] = useState<string | undefined>(undefined);
+  const fetchSocios = useCallback(async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('socio_titulares')
+      .select('*')
+      .order('apellidoPaterno', { ascending: true });
 
-  // Fetch all socio_titulares to get unique localities for the dropdown
-  const { data: allSocioTitularesForLocalities, loading: loadingAllLocalities } = useSupabaseData<SocioTitularType>({
-    tableName: 'socio_titulares',
-    enabled: true,
-  });
-
-  // Fetch socio_titulares data, applying the locality filter
-  const { data: socioTitularesData, loading, error, setFilters, deleteRecord, refreshData } = useSupabaseData<SocioTitularType>({
-    tableName: 'socio_titulares',
-    initialFilters: selectedLocality ? { localidad: selectedLocality } : {},
-  });
-
-  // Update filters in useSupabaseData when selectedLocality changes
-  useEffect(() => {
-    setFilters(selectedLocality ? { localidad: selectedLocality } : {});
-  }, [selectedLocality, setFilters]);
-
-  const { data: ingresosData, loading: loadingIngresos, error: errorIngresos } = useSupabaseData<Ingreso>({ tableName: 'ingresos' });
-
-  const handleDelete = async (id: string) => {
-    if (window.confirm('¿Estás seguro de que quieres eliminar este socio titular?')) {
-      await deleteRecord(id);
-      refreshData(); // Refrescar datos después de la eliminación
+    if (error) {
+      console.error('Error fetching socios:', error.message);
+      setError('Error al cargar los socios. Por favor, inténtalo de nuevo.');
+      setSocios([]);
+      toast.error('Error al cargar socios', { description: error.message });
+    } else {
+      setSocios(data || []);
+      setError(null);
     }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchSocios();
+  }, [fetchSocios]);
+
+  const handleDeleteSocio = async () => {
+    if (!socioToDelete) return;
+
+    setIsDeleting(true);
+    const { error } = await supabase
+      .from('socio_titulares')
+      .delete()
+      .eq('id', socioToDelete.id);
+
+    if (error) {
+      console.error('Error deleting socio:', error.message);
+      toast.error('Error al eliminar socio', { description: error.message });
+    } else {
+      toast.success('Socio eliminado', { description: `El socio ${socioToDelete.nombres} ${socioToDelete.apellidoPaterno} ha sido eliminado.` });
+      fetchSocios();
+      setIsDeleteDialogOpen(false);
+      setSocioToDelete(null);
+    }
+    setIsDeleting(false);
   };
 
-  const handleOpenFormDialog = (socioId?: string) => {
-    setEditingSocioId(socioId);
-    setIsFormDialogOpen(true);
-  };
-
-  const handleCloseFormDialog = () => {
-    setIsFormDialogOpen(false);
-    setEditingSocioId(undefined);
-    refreshData(); // Refrescar datos después de la eliminación o edición
-  };
-
-  // Derive unique localities from all fetched socio_titulares for the dropdown
-  const uniqueLocalities = useMemo(() => {
-    if (!allSocioTitularesForLocalities) return [];
-    const localities = new Set<string>();
-    allSocioTitularesForLocalities.forEach(socio => {
-      if (socio.localidad) {
-        localities.add(socio.localidad);
-      }
-    });
-    return Array.from(localities).sort();
-  }, [allSocioTitularesForLocalities]);
-
-  // Process socio titulares data to include payment status
-  const processedSocioTitulares = useMemo(() => {
-    if (!socioTitularesData || !ingresosData) return [];
-
-    const paidDnis = new Set(ingresosData.map(ingreso => ingreso.dni).filter(Boolean) as string[]);
-
-    return socioTitularesData.map(socio => {
-      let paymentStatus: 'Pagado' | 'Exonerado' | 'No Pagado' = 'No Pagado';
-
-      if (socio.situacionEconomica === 'Extremo Pobre') {
-        paymentStatus = 'Exonerado';
-      } else if (socio.dni && socio.situacionEconomica === 'Pobre' && paidDnis.has(socio.dni)) {
-        paymentStatus = 'Pagado';
-      }
-
-      return { ...socio, paymentStatus };
-    });
-  }, [socioTitularesData, ingresosData]);
-
-  // Update column actions to use the new handlers, defined inside the component
-  const columnsWithActions: ColumnDef<SocioTitularWithPaymentStatus>[] = socioTitularBaseColumns.map(col => {
-    if (col.id === 'actions') {
-      return {
-        ...col,
+  const columns: ColumnDef<SocioTitular>[] = useMemo(
+    () => [
+      {
+        accessorKey: 'dni',
+        header: ({ column }) => (
+          <Button
+            variant="ghost"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            className="text-text hover:text-primary"
+          >
+            DNI
+            <ArrowUpDown className="ml-2 h-4 w-4" />
+          </Button>
+        ),
+        cell: ({ row }) => <div className="font-medium">{row.getValue('dni')}</div>,
+      },
+      {
+        accessorKey: 'nombres',
+        header: ({ column }) => (
+          <Button
+            variant="ghost"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            className="text-text hover:text-primary"
+          >
+            Nombres
+            <ArrowUpDown className="ml-2 h-4 w-4" />
+          </Button>
+        ),
+        cell: ({ row }) => <div>{row.getValue('nombres')}</div>,
+      },
+      {
+        accessorKey: 'apellidoPaterno',
+        header: ({ column }) => (
+          <Button
+            variant="ghost"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            className="text-text hover:text-primary"
+          >
+            Apellido Paterno
+            <ArrowUpDown className="ml-2 h-4 w-4" />
+          </Button>
+        ),
+        cell: ({ row }) => <div>{row.getValue('apellidoPaterno')}</div>,
+      },
+      {
+        accessorKey: 'apellidoMaterno',
+        header: ({ column }) => (
+          <Button
+            variant="ghost"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+            className="text-text hover:text-primary"
+          >
+            Apellido Materno
+            <ArrowUpDown className="ml-2 h-4 w-4" />
+          </Button>
+        ),
+        cell: ({ row }) => <div>{row.getValue('apellidoMaterno')}</div>,
+      },
+      {
+        accessorKey: 'celular',
+        header: 'Celular',
+        cell: ({ row }) => <div>{row.getValue('celular') || 'N/A'}</div>,
+      },
+      {
+        accessorKey: 'localidad',
+        header: 'Localidad',
+        cell: ({ row }) => <div>{row.getValue('localidad') || 'N/A'}</div>,
+      },
+      {
+        id: 'actions',
+        enableHiding: false,
         cell: ({ row }) => {
-          const socioTitular = row.original;
+          const socio = row.original;
           return (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="h-8 w-8 p-0">
-                  <span className="sr-only">Abrir menú</span>
-                  <Edit className="h-4 w-4 text-muted-foreground hover:text-foreground transition-colors" />
+            <div className="flex space-x-2">
+              <Link to={`/edit-socio/${socio.id}`}>
+                <Button variant="ghost" size="icon" className="text-accent hover:bg-accent/10">
+                  <Edit className="h-4 w-4" />
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-card border-border rounded-lg shadow-lg">
-                <DropdownMenuItem onClick={() => handleOpenFormDialog(socioTitular.id)} className="hover:bg-muted/50 cursor-pointer">
-                  Editar
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleDelete(socioTitular.id)} className="hover:bg-destructive/20 text-destructive cursor-pointer">
-                  Eliminar
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+              </Link>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="text-destructive hover:bg-destructive/10"
+                onClick={() => {
+                  setSocioToDelete(socio);
+                  setIsDeleteDialogOpen(true);
+                }}
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+            </div>
           );
         },
-      };
-    }
-    return col;
-  });
+      },
+    ],
+    []
+  );
 
-  const overallLoading = loading || loadingIngresos || loadingAllLocalities;
-  const overallError = error || errorIngresos;
+  const customGlobalFilterFn = useCallback((row: Row<SocioTitular>, _columnId: string, filterValue: any) => {
+    const search = String(filterValue).toLowerCase(); // Ensure filterValue is a string for comparison
+    const socio = row.original; // Access the original SocioTitular object
 
-  if (overallLoading) {
-    return <div className="text-center text-muted-foreground">Cargando socios titulares y datos de ingresos...</div>;
+    const dni = socio.dni?.toLowerCase() || '';
+    const nombres = socio.nombres?.toLowerCase() || '';
+    const apellidoPaterno = socio.apellidoPaterno?.toLowerCase() || '';
+    const apellidoMaterno = socio.apellidoMaterno?.toLowerCase() || '';
+    const celular = socio.celular?.toLowerCase() || '';
+    const localidad = socio.localidad?.toLowerCase() || '';
+
+    return (
+      dni.includes(search) ||
+      nombres.includes(search) ||
+      apellidoPaterno.includes(search) ||
+      apellidoMaterno.includes(search) ||
+      celular.includes(search) ||
+      localidad.includes(search)
+    );
+  }, []);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background text-text font-sans flex items-center justify-center">
+        <Loader2 className="h-12 w-12 animate-spin text-primary" />
+        <p className="ml-4 text-lg">Cargando socios...</p>
+      </div>
+    );
   }
 
-  if (overallError) {
-    return <div className="text-center text-destructive">Error al cargar datos: {overallError}</div>;
+  if (error) {
+    return (
+      <div className="min-h-screen bg-background text-text font-sans flex items-center justify-center">
+        <p className="text-destructive text-lg">{error}</p>
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-8">
-      <Card className="rounded-xl border-border shadow-lg animate-fade-in">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-foreground">Gestión de Titulares</CardTitle>
-            <CardDescription className="text-muted-foreground">
-              Gestiona los perfiles de los titulares y su estado de pago.
-            </CardDescription>
-          </div>
-          <Button onClick={() => handleOpenFormDialog()} className="flex items-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
-            <PlusCircle className="h-4 w-4" />
-            Registrar Persona
-          </Button>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center gap-4 mb-4">
-            <div className="grid gap-2 flex-1 max-w-xs">
-              <Label htmlFor="localityFilter" className="text-textSecondary">Filtrar por Localidad</Label>
-              <Select
-                onValueChange={(value) => setSelectedLocality(value === 'all' ? null : value)}
-                value={selectedLocality || 'all'}
-              >
-                <SelectTrigger id="localityFilter" className="rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
-                  <SelectValue placeholder="Todas las localidades" />
-                </SelectTrigger>
-                <SelectContent className="bg-card border-border rounded-lg shadow-lg">
-                  <SelectItem value="all" className="hover:bg-muted/50 cursor-pointer">Todas las localidades</SelectItem>
-                  {uniqueLocalities.map(loc => (
-                    <SelectItem key={loc} value={loc} className="hover:bg-muted/50 cursor-pointer">
-                      {loc}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <DataTable
-            columns={columnsWithActions}
-            data={processedSocioTitulares}
-            globalFilter={globalFilter}
-            setGlobalFilter={setGlobalFilter}
-            filterPlaceholder="Buscar por DNI, nombres o apellidos..."
-            globalFilterFn={socioTitularGlobalFilterFn}
-          />
-        </CardContent>
-      </Card>
+    <div className="min-h-screen bg-background text-text font-sans p-6">
+      <header className="relative h-48 md:h-64 flex items-center justify-center overflow-hidden bg-gradient-to-br from-primary to-secondary rounded-xl shadow-lg mb-8">
+        <img
+          src="https://images.pexels.com/photos/3184433/pexels-photo-3184433.jpeg?auto=compress&cs=tinysrgb&w=1260&h=750&dpr=2"
+          alt="Community building"
+          className="absolute inset-0 w-full h-full object-cover opacity-30"
+        />
+        <div className="relative z-10 text-center p-4">
+          <h1 className="text-4xl md:text-5xl font-extrabold text-white drop-shadow-lg leading-tight">
+            Gestión de Socios Titulares
+          </h1>
+          <p className="mt-2 text-lg md:text-xl text-white text-opacity-90 max-w-2xl mx-auto">
+            Administra la información de todos los socios registrados.
+          </p>
+        </div>
+      </header>
 
-      {/* Diálogo de Registro/Edición de Socio Titular */}
-      <Dialog open={isFormDialogOpen} onOpenChange={handleCloseFormDialog}>
-        <DialogContent className="sm:max-w-[900px] max-h-[90vh] overflow-y-auto bg-card border-border rounded-xl shadow-lg p-0">
-          <DialogHeader className="p-6 pb-4">
-            <DialogTitle className="text-foreground text-2xl font-bold">
-              {editingSocioId ? 'Editar Socio Titular' : 'Registrar Nuevo Socio Titular'}
-            </DialogTitle>
-            <DialogDescription className="text-muted-foreground">
-              {editingSocioId ? 'Actualiza la información del socio titular existente.' : 'Completa el formulario para registrar un nuevo socio titular.'}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="px-6 pb-6">
-            <SocioTitularRegistrationForm
-              socioId={editingSocioId}
-              onClose={handleCloseFormDialog} // Este se usa para cerrar el diálogo principal SOLO en ediciones
-              onSuccess={refreshData} // Este solo refresca los datos de la tabla, no cierra el diálogo
+      <div className="container mx-auto py-10 bg-surface rounded-xl shadow-lg p-6">
+        <div className="flex items-center justify-between mb-6">
+          <div className="relative flex items-center w-full max-w-md">
+            <Search className="absolute left-3 h-5 w-5 text-textSecondary" />
+            <Input
+              placeholder="Buscar por DNI, nombre, apellido o celular..."
+              value={globalFilter ?? ''}
+              onChange={(event) => setGlobalFilter(event.target.value)}
+              className="pl-10 pr-4 py-2 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300 w-full"
             />
           </div>
-        </DialogContent>
-      </Dialog>
+          <Dialog open={isRegistrationDialogOpen} onOpenChange={setIsRegistrationDialogOpen}>
+            <DialogTrigger asChild>
+              <Button className="rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300 flex items-center gap-2">
+                <PlusCircle className="h-5 w-5" />
+                Registrar Nuevo Socio
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="sm:max-w-[800px] bg-card text-text border-border rounded-xl shadow-2xl p-6">
+              <DialogHeader>
+                <DialogTitle className="text-3xl font-bold text-primary">Registrar Socio Titular</DialogTitle>
+                <DialogDescription className="text-textSecondary">
+                  Completa los datos para registrar un nuevo socio.
+                </DialogDescription>
+              </DialogHeader>
+              <SocioTitularRegistrationForm
+                onClose={() => setIsRegistrationDialogOpen(false)}
+                onSuccess={() => {
+                  setIsRegistrationDialogOpen(false);
+                  fetchSocios();
+                }}
+              />
+            </DialogContent>
+          </Dialog>
+        </div>
+
+        <DataTable
+          columns={columns}
+          data={socios}
+          globalFilter={globalFilter}
+          setGlobalFilter={setGlobalFilter}
+          customGlobalFilterFn={customGlobalFilterFn}
+        />
+      </div>
+
+      <ConfirmationDialog
+        isOpen={isDeleteDialogOpen}
+        onClose={() => setIsDeleteDialogOpen(false)}
+        onConfirm={handleDeleteSocio}
+        title="Confirmar Eliminación"
+        description={`¿Estás seguro de que deseas eliminar al socio ${socioToDelete?.nombres} ${socioToDelete?.apellidoPaterno}? Esta acción no se puede deshacer.`}
+        confirmButtonText="Eliminar"
+        isConfirming={isDeleting}
+        data={socioToDelete || {}} // Pass socioToDelete here, or an empty object if null
+      />
     </div>
   );
 }

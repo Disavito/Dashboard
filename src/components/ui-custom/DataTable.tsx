@@ -1,27 +1,17 @@
-import * as React from 'react';
+import { useState } from 'react';
 import {
   ColumnDef,
+  flexRender,
+  getCoreRowModel,
+  useReactTable,
+  getPaginationRowModel,
+  getSortedRowModel,
+  getFilteredRowModel,
   ColumnFiltersState,
   SortingState,
   VisibilityState,
-  flexRender,
-  getCoreRowModel,
-  getFilteredRowModel,
-  getPaginationRowModel,
-  getSortedRowModel,
-  useReactTable,
-  FilterFn, // Import FilterFn
+  Row, // Import Row type
 } from '@tanstack/react-table';
-import { ChevronDown } from 'lucide-react';
-
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
-import { Input } from '@/components/ui/input';
 import {
   Table,
   TableBody,
@@ -30,40 +20,43 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { Card, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ChevronDown } from 'lucide-react';
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
   data: TData[];
-  onRowClick?: (row: TData) => void;
+  // Hacemos globalFilter y setGlobalFilter opcionales
   globalFilter?: string;
   setGlobalFilter?: (filter: string) => void;
   filterPlaceholder?: string;
-  globalFilterFn?: FilterFn<TData>; // New prop for custom global filter function
+  // Nueva prop para una función de filtro global personalizada
+  customGlobalFilterFn?: (row: Row<TData>, columnId: string, filterValue: any) => boolean;
 }
 
 export function DataTable<TData, TValue>({
   columns,
   data,
-  onRowClick,
   globalFilter,
   setGlobalFilter,
-  filterPlaceholder = 'Buscar...',
-  globalFilterFn, // Destructure the new prop
+  filterPlaceholder = "Buscar...",
+  customGlobalFilterFn, // Usar la nueva prop
 }: DataTableProps<TData, TValue>) {
-  const [sorting, setSorting] = React.useState<SortingState>([]);
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
-  const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({});
-  const [rowSelection, setRowSelection] = React.useState({});
+  const [sorting, setSorting] = useState<SortingState>([]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [rowSelection, setRowSelection] = useState({});
 
   const table = useReactTable({
     data,
     columns,
-    onSortingChange: setSorting,
-    onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    onSortingChange: setSorting,
     getSortedRowModel: getSortedRowModel(),
+    onColumnFiltersChange: setColumnFilters,
     getFilteredRowModel: getFilteredRowModel(),
     onColumnVisibilityChange: setColumnVisibility,
     onRowSelectionChange: setRowSelection,
@@ -74,28 +67,26 @@ export function DataTable<TData, TValue>({
       rowSelection,
       globalFilter,
     },
-    onGlobalFilterChange: setGlobalFilter,
-    globalFilterFn: globalFilterFn, // Pass the custom filter function if provided
+    // Solo si setGlobalFilter está definido, lo pasamos
+    onGlobalFilterChange: setGlobalFilter ? setGlobalFilter : undefined,
+    // Usar la función de filtro global personalizada si se proporciona, de lo contrario, usar 'auto'
+    globalFilterFn: customGlobalFilterFn || 'auto',
   });
 
   return (
-    <Card className="rounded-xl border-border shadow-lg animate-fade-in">
-      <CardContent className="p-6">
-        <div className="flex items-center py-4 gap-4">
-          {/* Input de búsqueda global */}
-          {setGlobalFilter && (
-            <div className="relative flex-1">
-              <Input
-                placeholder={filterPlaceholder}
-                value={globalFilter ?? ''}
-                onChange={(event) => setGlobalFilter(event.target.value)}
-                className="max-w-sm pl-4 rounded-lg border-border focus:ring-primary focus:border-primary transition-all duration-300"
-              />
-            </div>
-          )}
+    <div className="space-y-4">
+      {/* Renderizar el input de filtro solo si setGlobalFilter está presente */}
+      {setGlobalFilter && (
+        <div className="flex items-center py-4">
+          <Input
+            placeholder={filterPlaceholder}
+            value={globalFilter ?? ''}
+            onChange={(event) => setGlobalFilter(event.target.value)}
+            className="max-w-sm rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+          />
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="ml-auto rounded-lg border-border hover:bg-muted/100 hover:text-foreground transition-all duration-300">
+              <Button variant="outline" className="ml-auto rounded-lg border-border bg-background text-foreground hover:bg-muted/50 transition-all duration-300">
                 Columnas <ChevronDown className="ml-2 h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
@@ -120,79 +111,78 @@ export function DataTable<TData, TValue>({
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
-        <div className="rounded-md border border-border overflow-hidden">
-          <Table>
-            <TableHeader className="bg-muted/30">
-              {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id} className="border-border">
-                  {headerGroup.headers.map((header) => {
-                    return (
-                      <TableHead key={header.id} className="text-textSecondary font-medium text-sm">
-                        {header.isPlaceholder
-                          ? null
-                          : flexRender(
-                              header.column.columnDef.header,
-                              header.getContext()
-                            )}
-                      </TableHead>
-                    );
-                  })}
+      )}
+      <div className="rounded-xl border border-border overflow-hidden shadow-lg">
+        <Table>
+          <TableHeader className="bg-surface">
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id} className="border-border">
+                {headerGroup.headers.map((header) => {
+                  return (
+                    <TableHead key={header.id} className="text-textSecondary font-semibold">
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(
+                            header.column.columnDef.header,
+                            header.getContext()
+                          )}
+                    </TableHead>
+                  );
+                })}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {table.getRowModel().rows?.length ? (
+              table.getRowModel().rows.map((row) => (
+                <TableRow
+                  key={row.id}
+                  data-state={row.getIsSelected() && 'selected'}
+                  className="border-border hover:bg-muted/50 transition-colors duration-200"
+                >
+                  {row.getVisibleCells().map((cell) => (
+                    <TableCell key={cell.id} className="py-3">
+                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    </TableCell>
+                  ))}
                 </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {table.getRowModel().rows?.length ? (
-                table.getRowModel().rows.map((row) => (
-                  <TableRow
-                    key={row.id}
-                    data-state={row.getIsSelected() && 'selected'}
-                    className="border-border hover:bg-muted/20 transition-colors duration-200 cursor-pointer"
-                    onClick={() => onRowClick && onRowClick(row.original)}
-                  >
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id} className="py-3">
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </TableCell>
-                    ))}
-                  </TableRow>
-                ))
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
-                    No hay resultados.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+              ))
+            ) : (
+              <TableRow>
+                <TableCell colSpan={columns.length} className="h-24 text-center text-muted-foreground">
+                  No se encontraron resultados.
+                </TableCell>
+              </TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      <div className="flex items-center justify-end space-x-2 py-4">
+        <div className="flex-1 text-sm text-muted-foreground">
+          {table.getFilteredSelectedRowModel().rows.length} de{' '}
+          {table.getFilteredRowModel().rows.length} fila(s) seleccionada(s).
         </div>
-        <div className="flex items-center justify-end space-x-2 py-4">
-          <div className="flex-1 text-sm text-muted-foreground">
-            {table.getFilteredSelectedRowModel().rows.length} de{' '}
-            {table.getFilteredRowModel().rows.length} fila(s) seleccionada(s).
-          </div>
-          <div className="space-x-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => table.previousPage()}
-              disabled={!table.getCanPreviousPage()}
-              className="rounded-lg border-border hover:bg-muted/50 transition-all duration-300"
-            >
-              Anterior
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => table.nextPage()}
-              disabled={!table.getCanNextPage()}
-              className="rounded-lg border-border hover:bg-muted/50 transition-all duration-300"
-            >
-              Siguiente
-            </Button>
-          </div>
+        <div className="space-x-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => table.previousPage()}
+            disabled={!table.getCanPreviousPage()}
+            className="rounded-lg border-border bg-background text-foreground hover:bg-muted/50 transition-all duration-300"
+          >
+            Anterior
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => table.nextPage()}
+            disabled={!table.getCanNextPage()}
+            className="rounded-lg border-border bg-background text-foreground hover:bg-muted/50 transition-all duration-300"
+          >
+            Siguiente
+          </Button>
         </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }

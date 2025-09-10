@@ -513,7 +513,8 @@ function Overview() {
                   </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <DataTable columns={recentTransactionsColumns} data={recentTransactions} />
+                  {/* Pasamos globalFilter y setGlobalFilter como props vacías para satisfacer la interfaz opcional */}
+                  <DataTable columns={recentTransactionsColumns} data={recentTransactions} globalFilter="" setGlobalFilter={() => {}} />
                 </CardContent>
               </Card>
             </TabsContent>
