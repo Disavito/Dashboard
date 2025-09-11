@@ -97,7 +97,7 @@ const calculateAge = (dobString: string): number | null => {
 function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitularRegistrationFormProps) {
   const [activeTab, setActiveTab] = useState<'personal' | 'address'>('personal');
   const [isDniSearching, setIsDniSearching] = useState(false);
-  const [isReniecSearching, setIsReniecSearching] = useState(false);
+  const [isReniecSearching, setIsReniecSearching] = useState(false); // Keep separate for internal logic
 
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
   const [dataToConfirm, setDataToConfirm] = useState<SocioTitularFormValues | null>(null);
@@ -268,26 +268,14 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
     );
   };
 
-  const handleReniecSearch = useCallback(async () => {
-    if (!watchedDni || watchedDni.length !== 8) {
-      toast.error('DNI inválido', { description: 'Por favor, ingresa un DNI de 8 dígitos.' });
-      return;
+  // NEW: Helper function to fetch Reniec data and populate fields
+  const fetchReniecDataAndPopulate = useCallback(async (dni: string): Promise<boolean> => {
+    if (!dni || dni.length !== 8) {
+      return false; // Invalid DNI, no data fetched
     }
 
-    // Clear all relevant fields initially to ensure a clean slate for population
-    setValue('nombres', '');
-    setValue('apellidoPaterno', '');
-    setValue('apellidoMaterno', '');
-    setValue('fechaNacimiento', '');
-    setValue('edad', null);
-    setValue('celular', ''); // Celular is optional and not usually from Reniec
-    setValue('direccionDNI', '');
-    setValue('regionDNI', '');
-    setValue('provinciaDNI', '');
-    setValue('distritoDNI', '');
-    // 'localidad' should not be cleared by API search, it's a manual field.
-
     setIsReniecSearching(true);
+    let dataFound = false;
 
     // --- 1. Attempt Primary API Call (Consultas Peru) ---
     try {
@@ -300,7 +288,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
       const requestBody = {
         token: token,
         type_document: "dni",
-        document_number: watchedDni,
+        document_number: dni,
       };
 
       const response = await axios.post(apiUrl, requestBody, {
@@ -318,8 +306,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
         setValue('regionDNI', data.department || '');
         setValue('provinciaDNI', data.province || '');
         setValue('distritoDNI', data.district || '');
-        // 'localidad' should not be filled by API
-
+        dataFound = true;
         toast.success('Datos Reniec encontrados (API Principal)', { description: `Nombre: ${data.name} ${data.surname}` });
       } else {
         toast.warning('DNI no encontrado en API Principal', { description: response.data.message || 'No se encontraron datos para el DNI proporcionado.' });
@@ -332,29 +319,27 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
       toast.error('Error al consultar Reniec (API Principal)', { description: error.message || 'Hubo un problema al conectar con el servicio Reniec principal.' });
     }
 
-    // --- 2. Attempt Secondary API Call (miapi.cloud) if primary failed to fill essential fields ---
+    // --- 2. Attempt Secondary API Call (miapi.cloud) if primary failed to fill essential fields or no data found yet ---
     const fieldsToCheckForEmptiness = [
       'nombres', 'apellidoPaterno', 'apellidoMaterno', 'fechaNacimiento',
       'direccionDNI', 'regionDNI', 'provinciaDNI', 'distritoDNI'
-      // 'localidad' is intentionally excluded from this check and filling
     ];
+    const anyEssentialFieldStillEmpty = fieldsToCheckForEmptiness.some(field => !watch(field as keyof SocioTitularFormValues));
 
-    const anyFieldStillEmpty = fieldsToCheckForEmptiness.some(field => !watch(field as keyof SocioTitularFormValues));
-
-    if (anyFieldStillEmpty) {
+    if (!dataFound || anyEssentialFieldStillEmpty) { // Only try secondary if primary failed or didn't fill essential fields
       try {
         const secondaryApiToken = import.meta.env.VITE_MIAPI_CLOUD_API_TOKEN;
         if (!secondaryApiToken) {
           throw new Error('VITE_MIAPI_CLOUD_API_TOKEN no está configurado en el archivo .env');
         }
 
-        const secondaryApiUrl = `https://miapi.cloud/v1/dni/${watchedDni}`;
+        const secondaryApiUrl = `https://miapi.cloud/v1/dni/${dni}`;
         const secondaryResponse = await axios.get(secondaryApiUrl, {
           headers: {
             'Authorization': `Bearer ${secondaryApiToken}`,
           },
         });
-        const secondaryData = secondaryResponse.data.datos; // Corrected to access 'datos' key
+        const secondaryData = secondaryResponse.data.datos;
 
         if (secondaryResponse.data?.success && secondaryData) {
           // Only fill fields that are currently empty
@@ -366,8 +351,7 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
           if (!watch('regionDNI') && secondaryData.domiciliado?.departamento) setValue('regionDNI', secondaryData.domiciliado.departamento);
           if (!watch('provinciaDNI') && secondaryData.domiciliado?.provincia) setValue('provinciaDNI', secondaryData.domiciliado.provincia);
           if (!watch('distritoDNI') && secondaryData.domiciliado?.distrito) setValue('distritoDNI', secondaryData.domiciliado.distrito);
-          // 'localidad' should not be filled by API
-
+          dataFound = true; // Mark as found if secondary API provided data
           toast.info('Datos complementados con API Secundaria', { description: 'Algunos campos vacíos fueron llenados.' });
         } else {
           toast.warning('DNI no encontrado en API Secundaria', { description: secondaryResponse.data.message || 'No se encontraron datos adicionales para el DNI.' });
@@ -382,7 +366,87 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
     }
 
     setIsReniecSearching(false);
-  }, [watchedDni, setValue, watch]);
+    return dataFound;
+  }, [setValue, watch]); // Dependencies for useCallback
+
+  // MODIFIED: searchSocioByDni now orchestrates both local DB and Reniec API searches
+  const searchSocioByDni = useCallback(async (dni: string) => {
+    if (!dni || dni.length !== 8) {
+      // Clear fields if DNI is invalid or empty
+      setValue('nombres', '');
+      setValue('apellidoPaterno', '');
+      setValue('apellidoMaterno', '');
+      setValue('fechaNacimiento', '');
+      setValue('edad', null);
+      setValue('celular', '');
+      setValue('direccionDNI', '');
+      setValue('regionDNI', '');
+      setValue('provinciaDNI', '');
+      setValue('distritoDNI', '');
+      setValue('localidad', '');
+      return;
+    }
+
+    setIsDniSearching(true);
+
+    // Clear all relevant fields initially to ensure a clean slate for population
+    setValue('nombres', '');
+    setValue('apellidoPaterno', '');
+    setValue('apellidoMaterno', '');
+    setValue('fechaNacimiento', '');
+    setValue('edad', null);
+    setValue('celular', '');
+    setValue('direccionDNI', '');
+    setValue('regionDNI', '');
+    setValue('provinciaDNI', '');
+    setValue('distritoDNI', '');
+    // 'localidad' should not be cleared by API search, it's a manual field.
+
+    let dataFoundInDb = false;
+    let dataFoundInReniec = false;
+
+    // --- 1. Search Local Database ---
+    try {
+      const { data, error } = await supabase
+        .from('socio_titulares')
+        .select('nombres, apellidoPaterno, apellidoMaterno, fechaNacimiento, edad, celular, direccionDNI, regionDNI, provinciaDNI, distritoDNI, localidad')
+        .eq('dni', dni)
+        .single();
+
+      if (error && error.code !== 'PGRST116') { // PGRST116 means "no rows found"
+        console.error('Error searching socio by DNI in DB:', error.message);
+        toast.error('Error al buscar DNI en la base de datos', { description: error.message });
+      } else if (data) {
+        setValue('nombres', data.nombres);
+        setValue('apellidoPaterno', data.apellidoPaterno);
+        setValue('apellidoMaterno', data.apellidoMaterno);
+        setValue('fechaNacimiento', data.fechaNacimiento ? format(parseISO(data.fechaNacimiento), 'yyyy-MM-dd') : '');
+        setValue('edad', data.edad);
+        setValue('celular', data.celular);
+        setValue('direccionDNI', data.direccionDNI);
+        setValue('regionDNI', data.regionDNI);
+        setValue('provinciaDNI', data.provinciaDNI);
+        setValue('distritoDNI', data.distritoDNI);
+        setValue('localidad', data.localidad);
+        dataFoundInDb = true;
+        toast.success('Socio encontrado en la base de datos', { description: `Nombre: ${data.nombres} ${data.apellidoPaterno}` });
+      }
+    } catch (dbError: any) {
+      console.error('Unexpected error during DB search:', dbError);
+      toast.error('Error inesperado al buscar en la base de datos', { description: dbError.message });
+    }
+
+    // --- 2. If not found in local DB, try Reniec APIs ---
+    if (!dataFoundInDb) {
+      dataFoundInReniec = await fetchReniecDataAndPopulate(dni);
+    }
+
+    if (!dataFoundInDb && !dataFoundInReniec) {
+      toast.warning('DNI no encontrado', { description: 'No se encontró un socio con este DNI en la base de datos ni en Reniec.' });
+    }
+
+    setIsDniSearching(false);
+  }, [setValue, fetchReniecDataAndPopulate]); // Add fetchReniecDataAndPopulate to dependencies
 
 
   useEffect(() => {
@@ -420,69 +484,8 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
     fetchSocio();
   }, [socioId, reset]);
 
-  const searchSocioByDni = useCallback(async (dni: string) => {
-    if (!dni || dni.length !== 8) {
-      setValue('nombres', '');
-      setValue('apellidoPaterno', '');
-      setValue('apellidoMaterno', '');
-      return;
-    }
-    setIsDniSearching(true);
-    const { data, error } = await supabase
-      .from('socio_titulares')
-      .select('nombres, apellidoPaterno, apellidoMaterno, fechaNacimiento, edad, celular, direccionDNI, regionDNI, provinciaDNI, distritoDNI, localidad')
-      .eq('dni', dni)
-      .single();
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error searching socio by DNI:', error.message);
-      toast.error('Error al buscar DNI en la base de datos', { description: error.message });
-      setValue('nombres', '');
-      setValue('apellidoPaterno', '');
-      setValue('apellidoMaterno', '');
-      setValue('fechaNacimiento', '');
-      setValue('edad', null);
-      setValue('celular', '');
-      setValue('direccionDNI', '');
-      setValue('regionDNI', '');
-      setValue('provinciaDNI', '');
-      setValue('distritoDNI', '');
-      setValue('localidad', '');
-    } else if (data) {
-      setValue('nombres', data.nombres);
-      setValue('apellidoPaterno', data.apellidoPaterno);
-      setValue('apellidoMaterno', data.apellidoMaterno);
-      setValue('fechaNacimiento', data.fechaNacimiento ? format(parseISO(data.fechaNacimiento), 'yyyy-MM-dd') : '');
-      setValue('edad', data.edad);
-      setValue('celular', data.celular);
-      setValue('direccionDNI', data.direccionDNI);
-      setValue('regionDNI', data.regionDNI);
-      setValue('provinciaDNI', data.provinciaDNI);
-      setValue('distritoDNI', data.distritoDNI);
-      setValue('localidad', data.localidad);
-      toast.success('Socio encontrado en la base de datos', { description: `Nombre: ${data.nombres} ${data.apellidoPaterno}` });
-    } else {
-      setValue('nombres', '');
-      setValue('apellidoPaterno', '');
-      setValue('apellidoMaterno', '');
-      setValue('fechaNacimiento', '');
-      setValue('edad', null);
-      setValue('celular', '');
-      setValue('direccionDNI', '');
-      setValue('regionDNI', '');
-      setValue('provinciaDNI', '');
-      setValue('distritoDNI', '');
-      setValue('localidad', '');
-      toast.warning('DNI no encontrado en la base de datos', { description: 'No se encontró un socio con este DNI. Puedes consultar Reniec.' });
-    }
-    setIsDniSearching(false);
-  }, [setValue]);
-
-  useEffect(() => {
-    if (socioId !== undefined && watchedDni) { // Check for undefined
-      searchSocioByDni(watchedDni);
-    }
-  }, [socioId, watchedDni, searchSocioByDni]);
+  // REMOVED: The useEffect that was calling searchSocioByDni based on socioId and watchedDni.
+  // The onBlur event on the DNI input is now the primary trigger for DNI search.
 
   const handleCloseConfirmationOnly = () => {
     setIsConfirmDialogOpen(false);
@@ -642,22 +645,15 @@ function SocioTitularRegistrationForm({ socioId, onClose, onSuccess }: SocioTitu
                       {...register('dni')}
                       className="flex-grow rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
                       placeholder="Ej: 12345678"
+                      // DNI input is read-only during any search
                       readOnly={isDniSearching || isReniecSearching}
+                      // Triggers combined DB and Reniec search
                       onBlur={() => searchSocioByDni(watchedDni)}
                     />
-                    {isDniSearching && (
+                    {(isDniSearching || isReniecSearching) && (
                       <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 animate-spin text-primary" />
                     )}
-                    {watchedDni && watchedDni.length === 8 && (
-                      <Button
-                        type="button"
-                        onClick={handleReniecSearch}
-                        disabled={isReniecSearching || isDniSearching}
-                        className="rounded-lg bg-accent text-accent-foreground hover:bg-accent/90 transition-all duration-300 px-3 py-2 text-sm"
-                      >
-                        {isReniecSearching ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Consulta Reniec'}
-                      </Button>
-                    )}
+                    {/* Este es el ÚNICO campo de entrada para el DNI. La búsqueda se activa al salir del campo. */}
                   </div>
                   {errors.dni && <p className="col-span-full sm:col-span-4 text-right text-error text-sm">{errors.dni?.message}</p>}
                 </div>

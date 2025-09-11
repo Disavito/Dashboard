@@ -21,7 +21,6 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { ChevronDown } from 'lucide-react';
 
@@ -31,7 +30,7 @@ interface DataTableProps<TData, TValue> {
   // Hacemos globalFilter y setGlobalFilter opcionales
   globalFilter?: string;
   setGlobalFilter?: (filter: string) => void;
-  filterPlaceholder?: string;
+  // filterPlaceholder ya no es necesario aquí
   // Nueva prop para una función de filtro global personalizada
   customGlobalFilterFn?: (row: Row<TData>, columnId: string, filterValue: any) => boolean;
 }
@@ -41,7 +40,7 @@ export function DataTable<TData, TValue>({
   data,
   globalFilter,
   setGlobalFilter,
-  filterPlaceholder = "Buscar...",
+  // filterPlaceholder ya no se desestructura aquí
   customGlobalFilterFn, // Usar la nueva prop
 }: DataTableProps<TData, TValue>) {
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -75,43 +74,36 @@ export function DataTable<TData, TValue>({
 
   return (
     <div className="space-y-4">
-      {/* Renderizar el input de filtro solo si setGlobalFilter está presente */}
-      {setGlobalFilter && (
-        <div className="flex items-center py-4">
-          <Input
-            placeholder={filterPlaceholder}
-            value={globalFilter ?? ''}
-            onChange={(event) => setGlobalFilter(event.target.value)}
-            className="max-w-sm rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
-          />
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" className="ml-auto rounded-lg border-border bg-background text-foreground hover:bg-muted/50 transition-all duration-300">
-                Columnas <ChevronDown className="ml-2 h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="bg-card border-border rounded-lg shadow-lg">
-              {table
-                .getAllColumns()
-                .filter((column) => column.getCanHide())
-                .map((column) => {
-                  return (
-                    <DropdownMenuCheckboxItem
-                      key={column.id}
-                      className="capitalize hover:bg-muted/50 cursor-pointer"
-                      checked={column.getIsVisible()}
-                      onCheckedChange={(value) =>
-                        column.toggleVisibility(!!value)
-                      }
-                    >
-                      {column.id}
-                    </DropdownMenuCheckboxItem>
-                  );
-                })}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      )}
+      {/* El input de filtro global se ha movido al componente padre (People.tsx) */}
+      {/* Solo mantenemos el DropdownMenu para la visibilidad de columnas aquí */}
+      <div className="flex items-center py-4 justify-end"> {/* Added justify-end to align dropdown to the right */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="ml-auto rounded-lg border-border bg-background text-foreground hover:bg-muted/50 transition-all duration-300">
+              Columnas <ChevronDown className="ml-2 h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="bg-card border-border rounded-lg shadow-lg">
+            {table
+              .getAllColumns()
+              .filter((column) => column.getCanHide())
+              .map((column) => {
+                return (
+                  <DropdownMenuCheckboxItem
+                    key={column.id}
+                    className="capitalize hover:bg-muted/50 cursor-pointer"
+                    checked={column.getIsVisible()}
+                    onCheckedChange={(value) =>
+                      column.toggleVisibility(!!value)
+                    }
+                  >
+                    {column.id}
+                  </DropdownMenuCheckboxItem>
+                );
+              })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
       <div className="rounded-xl border border-border overflow-hidden shadow-lg">
         <Table>
           <TableHeader className="bg-surface">

@@ -1,4 +1,4 @@
-  celular: z.string()
+celular: z.string()
     .max(15, { message: 'El celular es demasiado largo.' })
     .optional()
     .nullable()

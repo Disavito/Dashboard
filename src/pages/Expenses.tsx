@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ColumnDef, Row } from '@tanstack/react-table'; // Import Row type
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PlusCircle, Edit, ArrowUpDown, CalendarIcon, XCircle } from 'lucide-react';
+import { PlusCircle, Edit, ArrowUpDown, CalendarIcon, XCircle, Search } from 'lucide-react'; // Added Search icon
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui-custom/DataTable';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -41,7 +41,7 @@ const expenseFormSchema = z.object({
   account: z.string().min(1, { message: 'La cuenta es requerida.' }),
   date: z.string().min(1, { message: 'La fecha es requerida.' }),
   category: z.string().min(1, { message: 'La categoría es requerida.' }),
-  subcategory: z.string().optional().nullable(), // Corregido a subcategory
+  subcategory: z.string().optional().nullable(),
   description: z.string().min(1, { message: 'La descripción es requerida.' }).max(255, { message: 'La descripción es demasiado larga.' }),
   numero_gasto: z.string().optional().nullable(),
   colaborador_id: z.string().uuid().optional().nullable(),
@@ -56,7 +56,7 @@ type ExpenseFormInputValues = {
   account: string;
   date: string;
   category: string;
-  subcategory: string | null; // Corregido a subcategory
+  subcategory: string | null;
   description: string;
   numero_gasto: string | null;
   colaborador_id: string | null;
@@ -81,7 +81,16 @@ const expenseColumns: ColumnDef<GastoType>[] = [
   },
   {
     accessorKey: 'numero_gasto',
-    header: 'Nº Gasto',
+    header: ({ column }) => (
+      <Button
+        variant="ghost"
+        onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+        className="px-0 hover:bg-transparent hover:text-accent"
+      >
+        Nº Gasto
+        <ArrowUpDown className="ml-2 h-4 w-4" />
+      </Button>
+    ),
     cell: ({ row }) => <span className="font-medium text-foreground">{row.getValue('numero_gasto') || 'N/A'}</span>,
   },
   {
@@ -104,12 +113,12 @@ const expenseColumns: ColumnDef<GastoType>[] = [
     cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('category')}</span>,
   },
   {
-    accessorKey: 'subcategory', // Corregido a subcategory
+    accessorKey: 'subcategory',
     header: 'Subcategoría',
     cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('subcategory') || 'N/A'}</span>,
   },
   {
-    accessorKey: 'account', // Añadido account como accessorKey
+    accessorKey: 'account',
     header: 'Cuenta',
     cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('account')}</span>,
   },
@@ -123,7 +132,7 @@ const expenseColumns: ColumnDef<GastoType>[] = [
     header: () => <div className="text-right">Monto</div>,
     cell: ({ row }) => {
       const amount = parseFloat(row.getValue('amount'));
-      const formattedAmount = new Intl.NumberFormat('es-PE', { // Changed to es-PE and PEN
+      const formattedAmount = new Intl.NumberFormat('es-PE', {
         style: 'currency',
         currency: 'PEN',
       }).format(amount);
@@ -225,7 +234,7 @@ function Expenses() {
       account: '',
       date: format(new Date(), 'yyyy-MM-dd'),
       category: '',
-      subcategory: null, // Corregido a subcategory
+      subcategory: null,
       description: '',
       numero_gasto: null,
       colaborador_id: null,
@@ -257,7 +266,7 @@ function Expenses() {
   };
 
   // Función de filtro global personalizada para gastos
-  const expenseGlobalFilterFn = useCallback((row: Row<GastoType>, _columnId: string, filterValue: string) => { // Eliminado columnId no utilizado
+  const expenseGlobalFilterFn = useCallback((row: Row<GastoType>, _columnId: string, filterValue: string) => {
     const search = filterValue.toLowerCase();
     const original = row.original;
 
@@ -274,7 +283,7 @@ function Expenses() {
     }
 
     // Buscar en subcategoría
-    const subcategory = original.subcategory?.toLowerCase(); // Corregido a subcategory
+    const subcategory = original.subcategory?.toLowerCase();
     if (subcategory && subcategory.includes(search)) {
       return true;
     }
@@ -301,10 +310,10 @@ function Expenses() {
     if (expense) {
       form.reset({
         amount: expense.amount.toString(),
-        account: expense.account || '', // Corregido a expense.account
+        account: expense.account || '',
         date: expense.date,
         category: expense.category || '',
-        subcategory: expense.subcategory || null, // Corregido a subcategory
+        subcategory: expense.subcategory || null,
         description: expense.description || '',
         numero_gasto: expense.numero_gasto || null,
         colaborador_id: expense.colaborador_id || null,
@@ -316,7 +325,7 @@ function Expenses() {
         account: '',
         date: format(new Date(), 'yyyy-MM-dd'),
         category: '',
-        subcategory: null, // Corregido a subcategory
+        subcategory: null,
         description: '',
         numero_gasto: nextNumeroGasto,
         colaborador_id: null,
@@ -377,7 +386,7 @@ function Expenses() {
           account: '',
           date: format(new Date(), 'yyyy-MM-dd'),
           category: '',
-          subcategory: null, // Corregido a subcategory
+          subcategory: null,
           description: '',
           numero_gasto: nextNumeroGastoForForm,
           colaborador_id: null,
@@ -394,7 +403,7 @@ function Expenses() {
     }
   };
 
-  const handleDelete = async (id: number) => { // Cambiado a number para coincidir con el tipo de Gasto
+  const handleDelete = async (id: number) => {
     if (window.confirm('¿Estás seguro de que quieres eliminar este gasto?')) {
       await deleteRecord(id);
       toast.success('Gasto eliminado', { description: 'El gasto ha sido eliminado exitosamente.' });
@@ -462,6 +471,17 @@ function Expenses() {
 
           {/* Filter Section */}
           <div className="flex flex-wrap items-center gap-4 pt-4 border-t border-border mt-4">
+            {/* Global Search Input */}
+            <div className="relative flex-grow max-w-sm">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Buscar por categoría, número de gasto, subcategoría o descripción..."
+                value={globalFilter ?? ''}
+                onChange={(event) => setGlobalFilter(event.target.value)}
+                className="pl-9 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+              />
+            </div>
+
             {/* Date Filter */}
             <div className="flex items-center gap-2">
               <Label htmlFor="filter-date" className="text-textSecondary">Fecha:</Label>
@@ -533,8 +553,7 @@ function Expenses() {
             data={expenseData}
             globalFilter={globalFilter}
             setGlobalFilter={setGlobalFilter}
-            filterPlaceholder="Buscar por categoría, número de gasto, subcategoría o descripción..."
-            customGlobalFilterFn={expenseGlobalFilterFn} // Pasar la función de filtro global personalizada
+            customGlobalFilterFn={expenseGlobalFilterFn}
           />
         </CardContent>
       </Card>
@@ -591,7 +610,7 @@ function Expenses() {
                 </Label>
                 <Select onValueChange={(value) => {
                   form.setValue('category', value);
-                  form.setValue('subcategory', null); // Corregido a subcategory
+                  form.setValue('subcategory', null);
                 }} value={form.watch('category')}>
                   <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
                     <SelectValue placeholder="Selecciona una categoría" />
@@ -609,10 +628,10 @@ function Expenses() {
 
               {watchedCategory && (watchedCategory === 'Gasto Fijo' || watchedCategory === 'Viáticos') && (
                 <div className="grid grid-cols-4 items-center gap-4">
-                  <Label htmlFor="subcategory" className="text-right text-textSecondary"> {/* Corregido a subcategory */}
+                  <Label htmlFor="subcategory" className="text-right text-textSecondary">
                     Subcategoría
                   </Label>
-                  <Select onValueChange={(value) => form.setValue('subcategory', value)} value={form.watch('subcategory') || ''}> {/* Corregido a subcategory */}
+                  <Select onValueChange={(value) => form.setValue('subcategory', value)} value={form.watch('subcategory') || ''}>
                     <SelectTrigger className="col-span-3 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300">
                       <SelectValue placeholder="Selecciona una subcategoría" />
                     </SelectTrigger>
@@ -629,7 +648,7 @@ function Expenses() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {form.formState.errors.subcategory && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.subcategory.message}</p>} {/* Corregido a subcategory */}
+                  {form.formState.errors.subcategory && <p className="col-span-4 text-right text-error text-sm">{form.formState.errors.subcategory.message}</p>}
                 </div>
               )}
 

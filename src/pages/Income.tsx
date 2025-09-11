@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { ColumnDef } from '@tanstack/react-table';
+import { ColumnDef, Column, Row } from '@tanstack/react-table';
 import { format, parseISO } from 'date-fns';
 import { es } from 'date-fns/locale';
-import { PlusCircle, Edit, ArrowUpDown, Loader2, CalendarIcon } from 'lucide-react';
+import { PlusCircle, Edit, ArrowUpDown, Loader2, CalendarIcon, Search } from 'lucide-react'; // Added Search icon
 import { Button } from '@/components/ui/button';
 import { DataTable } from '@/components/ui-custom/DataTable';
 import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
@@ -23,7 +23,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { FormField, FormItem, FormLabel, FormControl, FormMessage, Form } from '@/components/ui/form';
 import ConfirmationDialog from '@/components/ui-custom/ConfirmationDialog';
-import { Checkbox } from '@/components/ui/checkbox'; // Import Checkbox
+import { Checkbox } from '@/components/ui/checkbox';
 
 // --- Form Schema for Ingreso ---
 const incomeFormSchema = z.object({
@@ -36,15 +36,15 @@ const incomeFormSchema = z.object({
       return Number(val);
     },
     z.number({
-      required_error: 'El monto es requerido.', // Message for undefined/null
-      invalid_type_error: 'El monto debe ser un número.' // Message for non-numeric
+      required_error: 'El monto es requerido.',
+      invalid_type_error: 'El monto debe ser un número.'
     })
   ),
   account: z.string().min(1, { message: 'La cuenta es requerida.' }),
   date: z.string().min(1, { message: 'La fecha es requerida.' }),
   transaction_type: z.enum(['Ingreso', 'Anulacion', 'Devolucion'], { message: 'Tipo de transacción inválido.' }),
-  numeroOperacion: z.string().optional().nullable(), // Campo corregido: numeroOperacion
-  allow_duplicate_numero_operacion: z.boolean().optional().default(false), // NEW FIELD for UI control
+  numeroOperacion: z.string().optional().nullable(),
+  allow_duplicate_numero_operacion: z.boolean().optional().default(false),
 })
 .refine((data) => {
   // For 'Ingreso', amount must be strictly positive
@@ -59,7 +59,7 @@ const incomeFormSchema = z.object({
 .refine((data) => {
   // Conditional requirement for numeroOperacion
   if (['BBVA Empresa', 'Cuenta Fidel'].includes(data.account) && !data.numeroOperacion) {
-    return false; // Required if account is BBVA Empresa or Cuenta Fidel and numeroOperacion is empty
+    return false;
   }
   return true;
 }, {
@@ -95,8 +95,8 @@ type IncomeFormInputValues = {
   account: string;
   date: string;
   transaction_type: 'Ingreso' | 'Anulacion' | 'Devolucion';
-  numeroOperacion: string; // Campo corregido
-  allow_duplicate_numero_operacion: boolean; // NEW FIELD
+  numeroOperacion: string;
+  allow_duplicate_numero_operacion: boolean;
 };
 
 
@@ -104,7 +104,7 @@ type IncomeFormInputValues = {
 const incomeColumns: ColumnDef<IngresoType>[] = [
   {
     accessorKey: 'date',
-    header: ({ column }) => (
+    header: ({ column }: { column: Column<IngresoType> }) => (
       <Button
         variant="ghost"
         onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
@@ -114,36 +114,45 @@ const incomeColumns: ColumnDef<IngresoType>[] = [
         <ArrowUpDown className="ml-2 h-4 w-4" />
       </Button>
     ),
-    cell: ({ row }) => format(parseISO(row.getValue('date')), 'dd MMM yyyy', { locale: es }),
+    cell: ({ row }: { row: Row<IngresoType> }) => format(parseISO(row.getValue('date')), 'dd MMM yyyy', { locale: es }),
   },
   {
     accessorKey: 'receipt_number',
-    header: 'Nº Recibo',
-    cell: ({ row }) => <span className="font-medium text-foreground">{row.getValue('receipt_number')}</span>,
+    header: ({ column }: { column: Column<IngresoType> }) => (
+      <Button
+        variant="ghost"
+        onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+        className="px-0 hover:bg-transparent hover:text-accent"
+      >
+        Nº Recibo
+        <ArrowUpDown className="ml-2 h-4 w-4" />
+      </Button>
+    ),
+    cell: ({ row }: { row: Row<IngresoType> }) => <span className="font-medium text-foreground">{row.getValue('receipt_number')}</span>,
   },
   {
     accessorKey: 'full_name',
     header: 'Nombre Completo',
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('full_name')}</span>,
+    cell: ({ row }: { row: Row<IngresoType> }) => <span className="text-muted-foreground">{row.getValue('full_name')}</span>,
   },
   {
     accessorKey: 'dni',
     header: 'DNI',
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('dni')}</span>,
+    cell: ({ row }: { row: Row<IngresoType> }) => <span className="text-muted-foreground">{row.getValue('dni')}</span>,
   },
   {
     accessorKey: 'account',
     header: 'Cuenta',
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('account')}</span>,
+    cell: ({ row }: { row: Row<IngresoType> }) => <span className="text-muted-foreground">{row.getValue('account')}</span>,
   },
   {
-    accessorKey: 'numeroOperacion', // Campo corregido en la tabla
+    accessorKey: 'numeroOperacion',
     header: 'Nº Operación',
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('numeroOperacion') || '-'}</span>,
+    cell: ({ row }: { row: Row<IngresoType> }) => <span className="text-muted-foreground">{row.getValue('numeroOperacion') || '-'}</span>,
   },
   {
     accessorKey: 'transaction_type',
-    header: ({ column }) => (
+    header: ({ column }: { column: Column<IngresoType> }) => (
       <Button
         variant="ghost"
         onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
@@ -153,12 +162,12 @@ const incomeColumns: ColumnDef<IngresoType>[] = [
         <ArrowUpDown className="ml-2 h-4 w-4" />
       </Button>
     ),
-    cell: ({ row }) => <span className="text-muted-foreground">{row.getValue('transaction_type')}</span>,
+    cell: ({ row }: { row: Row<IngresoType> }) => <span className="text-muted-foreground">{row.getValue('transaction_type')}</span>,
   },
   {
     accessorKey: 'amount',
     header: () => <div className="text-right">Monto</div>,
-    cell: ({ row }) => {
+    cell: ({ row }: { row: Row<IngresoType> }) => {
       const amount = parseFloat(row.getValue('amount'));
       const formattedAmount = new Intl.NumberFormat('es-PE', {
         style: 'currency',
@@ -186,10 +195,10 @@ function Income() {
   const [editingIncome, setEditingIncome] = useState<IngresoType | null>(null);
   const [globalFilter, setGlobalFilter] = useState('');
   const [isDniSearching, setIsDniSearching] = useState(false);
-  const [isDuplicateNumeroOperacionDetected, setIsDuplicateNumeroOperacionDetected] = useState(false); // NEW state for checkbox activation
+  const [isDuplicateNumeroOperacionDetected, setIsDuplicateNumeroOperacionDetected] = useState(false);
 
   const [isConfirmDialogOpen, setIsConfirmDialogOpen] = useState(false);
-  const [dataToConfirm, setDataToConfirm] = useState<Omit<IncomeFormValues, 'allow_duplicate_numero_operacion'> | null>(null); // Omit the UI flag
+  const [dataToConfirm, setDataToConfirm] = useState<Omit<IncomeFormValues, 'allow_duplicate_numero_operacion'> | null>(null);
   const [isConfirmingSubmission, setIsConfirmingSubmission] = useState(false);
 
 
@@ -203,16 +212,16 @@ function Income() {
       account: '',
       date: format(new Date(), 'yyyy-MM-dd'),
       transaction_type: 'Ingreso',
-      numeroOperacion: '', // Campo corregido
-      allow_duplicate_numero_operacion: false, // NEW: Default to false
+      numeroOperacion: '',
+      allow_duplicate_numero_operacion: false,
     },
   });
 
   const { handleSubmit, register, setValue, watch, formState: { errors } } = form;
   const watchedDni = watch('dni');
   const watchedTransactionType = watch('transaction_type');
-  const watchedAccount = watch('account'); // Observar el campo de cuenta
-  const watchedNumeroOperacion = watch('numeroOperacion'); // Watch numeroOperacion for conditional checkbox
+  const watchedAccount = watch('account');
+  const watchedNumeroOperacion = watch('numeroOperacion');
 
   // Fetch accounts from Supabase
   const availableAccounts = accountsData.map(account => account.name);
@@ -266,7 +275,7 @@ function Income() {
 
   const handleOpenDialog = (income?: IngresoType) => {
     setEditingIncome(income || null);
-    setIsDuplicateNumeroOperacionDetected(false); // Reset checkbox activation state
+    setIsDuplicateNumeroOperacionDetected(false);
     if (income) {
       form.reset({
         receipt_number: income.receipt_number || '',
@@ -276,8 +285,8 @@ function Income() {
         account: income.account || '',
         date: income.date,
         transaction_type: income.transaction_type as IncomeFormInputValues['transaction_type'] || 'Ingreso',
-        numeroOperacion: income.numeroOperacion || '', // Campo corregido
-        allow_duplicate_numero_operacion: false, // Reset checkbox on edit
+        numeroOperacion: income.numeroOperacion || '',
+        allow_duplicate_numero_operacion: false,
       });
     } else {
       form.reset({
@@ -288,8 +297,8 @@ function Income() {
         account: '',
         date: format(new Date(), 'yyyy-MM-dd'),
         transaction_type: 'Ingreso',
-        numeroOperacion: '', // Campo corregido
-        allow_duplicate_numero_operacion: false, // Reset checkbox on new
+        numeroOperacion: '',
+        allow_duplicate_numero_operacion: false,
       });
     }
     setIsDialogOpen(true);
@@ -298,7 +307,7 @@ function Income() {
   const handleCloseDialog = () => {
     setIsDialogOpen(false);
     setEditingIncome(null);
-    setIsDuplicateNumeroOperacionDetected(false); // Reset checkbox activation state
+    setIsDuplicateNumeroOperacionDetected(false);
     form.reset({
       receipt_number: '',
       dni: '',
@@ -307,8 +316,8 @@ function Income() {
       account: '',
       date: format(new Date(), 'yyyy-MM-dd'),
       transaction_type: 'Ingreso',
-      numeroOperacion: '', // Campo corregido
-      allow_duplicate_numero_operacion: false, // Ensure checkbox is reset
+      numeroOperacion: '',
+      allow_duplicate_numero_operacion: false,
     });
     handleCloseConfirmationOnly();
   };
@@ -330,7 +339,7 @@ function Income() {
       let query = supabase
         .from('ingresos')
         .select('id')
-        .eq('numeroOperacion', parsedValues.numeroOperacion); // Campo corregido
+        .eq('numeroOperacion', parsedValues.numeroOperacion);
 
       // If editing, exclude the current income's ID from the uniqueness check
       if (editingIncome) {
@@ -342,24 +351,24 @@ function Income() {
       if (supabaseError) {
         console.error('Error checking numeroOperacion uniqueness:', supabaseError.message);
         toast.error('Error de validación', { description: 'No se pudo verificar la unicidad del número de operación.' });
-        return; // Stop submission
+        return;
       }
 
       if (existingIncomes && existingIncomes.length > 0) {
-        form.setError('numeroOperacion', { // Campo corregido
+        form.setError('numeroOperacion', {
           type: 'manual',
           message: 'El número de operación ya existe. Marque "Permitir duplicado" si es intencional.',
         });
-        setIsDuplicateNumeroOperacionDetected(true); // Enable the checkbox
+        setIsDuplicateNumeroOperacionDetected(true);
         toast.error('Error de validación', { description: 'El número de operación ya existe.' });
-        return; // Stop submission
+        return;
       }
     }
 
     // If all checks pass, proceed to confirmation
     // Omit allow_duplicate_numero_operacion before passing to confirmation dialog
     const { allow_duplicate_numero_operacion, ...dataToConfirmWithoutFlag } = parsedValues;
-    setDataToConfirm(dataToConfirmWithoutFlag); // Pass data without the flag to the confirmation dialog
+    setDataToConfirm(dataToConfirmWithoutFlag);
     setIsConfirmDialogOpen(true);
   };
 
@@ -386,8 +395,8 @@ function Income() {
           account: '',
           date: format(new Date(), 'yyyy-MM-dd'),
           transaction_type: 'Ingreso',
-          numeroOperacion: '', // Campo corregido
-          allow_duplicate_numero_operacion: false, // Reset the checkbox
+          numeroOperacion: '',
+          allow_duplicate_numero_operacion: false,
         });
         setEditingIncome(null);
         handleCloseConfirmationOnly();
@@ -411,7 +420,7 @@ function Income() {
     if (col.id === 'actions') {
       return {
         ...col,
-        cell: ({ row }) => {
+        cell: ({ row }: { row: Row<IngresoType> }) => {
           const income = row.original;
           return (
             <DropdownMenu>
@@ -452,17 +461,30 @@ function Income() {
   return (
     <div className="space-y-8">
       <Card className="rounded-xl border-border shadow-lg animate-fade-in">
-        <CardHeader className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle className="text-foreground">Gestión de Ingresos</CardTitle>
-            <CardDescription className="text-muted-foreground">
-              Visualiza, busca y gestiona tus ingresos.
-            </CardDescription>
+        <CardHeader className="flex flex-col space-y-4">
+          <div className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-foreground">Gestión de Ingresos</CardTitle>
+              <CardDescription className="text-muted-foreground">
+                Visualiza, busca y gestiona tus ingresos.
+              </CardDescription>
+            </div>
+            <Button onClick={() => handleOpenDialog()} className="flex items-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
+              <PlusCircle className="h-4 w-4" />
+              Añadir Ingreso
+            </Button>
           </div>
-          <Button onClick={() => handleOpenDialog()} className="flex items-center gap-2 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 transition-all duration-300">
-            <PlusCircle className="h-4 w-4" />
-            Añadir Ingreso
-          </Button>
+
+          {/* Global Search Input */}
+          <div className="relative flex-grow max-w-sm pt-4 border-t border-border mt-4"> {/* Added border-t and mt-4 for separation */}
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Buscar ingresos por nombre, DNI o número de recibo..."
+              value={globalFilter ?? ''}
+              onChange={(event) => setGlobalFilter(event.target.value)}
+              className="pl-9 rounded-lg border-border bg-background text-foreground focus:ring-primary focus:border-primary transition-all duration-300"
+            />
+          </div>
         </CardHeader>
         <CardContent>
           <DataTable
@@ -470,7 +492,6 @@ function Income() {
             data={incomeData}
             globalFilter={globalFilter}
             setGlobalFilter={setGlobalFilter}
-            filterPlaceholder="Buscar ingresos por nombre, DNI o número de recibo..."
           />
         </CardContent>
       </Card>
@@ -590,14 +611,14 @@ function Income() {
                       id="allow_duplicate_numero_operacion"
                       checked={watch('allow_duplicate_numero_operacion')}
                       onCheckedChange={(checked) => setValue('allow_duplicate_numero_operacion', checked as boolean)}
-                      disabled={!isDuplicateNumeroOperacionDetected} // Only activable if duplicate is detected
+                      disabled={!isDuplicateNumeroOperacionDetected}
                       className="border-border data-[state=checked]:bg-primary data-[state=checked]:text-primary-foreground"
                     />
                     <Label
                       htmlFor="allow_duplicate_numero_operacion"
                       className={cn(
                         "text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 text-textSecondary",
-                        isDuplicateNumeroOperacionDetected && "cursor-pointer" // Indicate it's clickable when enabled
+                        isDuplicateNumeroOperacionDetected && "cursor-pointer"
                       )}
                     >
                       Permitir duplicado de Nº Operación
